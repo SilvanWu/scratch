@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+# index.html is intentionally tracked as the playable single-file build.
+dist/
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+.cache/
+
+# Local environment and editor state
+.env
+.env.*
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini

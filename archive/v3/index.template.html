@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>古墓不让进 — V3 原型</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #07060a; cursor: none; }
+  #game-canvas { display: block; width: 100%; height: 100%; }
+  #hud {
+    position: fixed; inset: 0; pointer-events: none;
+    font-family: 'Segoe UI', system-ui, sans-serif; color: #fff;
+  }
+  /* 暗角（低血/低神智） */
+  #vignette {
+    position: fixed; inset: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 42%, rgba(120,0,10,.75) 100%);
+    transition: opacity .4s;
+  }
+  /* 左上：血量/神智 */
+  #stat-panel {
+    position: absolute; top: 14px; left: 14px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .sbar {
+    width: 220px; height: 16px; border-radius: 8px; overflow: hidden; position: relative;
+    background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.22);
+  }
+  .sbar .fill { height: 100%; transition: width .15s; }
+  #hp-fill { background: linear-gradient(90deg,#a8182a,#e8504d); width: 100%; }
+  #san-fill { background: linear-gradient(90deg,#4455cc,#7d9bff); width: 100%; }
+  .sbar .lab {
+    position: absolute; inset: 0; font-size: 11px; line-height: 16px;
+    padding-left: 8px; text-shadow: 0 1px 2px #000;
+  }
+  .sbar .num {
+    position: absolute; right: 8px; top: 0; font-size: 11px; line-height: 16px;
+    text-shadow: 0 1px 2px #000;
+  }
+  /* 右上：金币/深度 */
+  #run-panel {
+    position: absolute; top: 14px; right: 18px; text-align: right;
+    font-weight: 700; text-shadow: 0 1px 3px #000;
+  }
+  #coins-text { font-size: 20px; color: #ffd24d; }
+  #depth-text { font-size: 14px; color: #b9c4d8; margin-top: 4px; }
+  /* 底中：弹药 */
+  #ammo-panel {
+    position: absolute; bottom: 26px; right: 30px; text-align: right;
+  }
+  #ammo-text { font-size: 30px; font-weight: 800; letter-spacing: 2px; text-shadow: 0 2px 4px #000; }
+  #reload-hint { font-size: 14px; color: #ffd24d; opacity: 0; text-shadow: 0 1px 2px #000; }
+  #ammo-sub { font-size: 11px; color: rgba(255,255,255,.5); }
+  /* 状态标签 */
+  #state-text {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    font-size: 17px; font-weight: 700; color: #e8d9b0; text-shadow: 0 1px 4px #000;
+    letter-spacing: 1px;
+  }
+  /* 准星 */
+  #crosshair {
+    position: fixed; left: -12px; top: -12px; width: 24px; height: 24px;
+    pointer-events: none; will-change: transform;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: rgba(255,255,255,.9);
+  }
+  #crosshair::before { left: 11px; top: 2px; width: 2px; height: 20px; }
+  #crosshair::after { left: 2px; top: 11px; width: 20px; height: 2px; }
+  #hitmarker {
+    position: fixed; left: -10px; top: -28px; pointer-events: none;
+    font-size: 22px; font-weight: 900; opacity: 0; will-change: transform;
+    text-shadow: 0 1px 3px #000;
+  }
+  #toast {
+    position: absolute; top: 90px; left: 50%; transform: translateX(-50%);
+    font-size: 22px; font-weight: 800; color: #ffe34d;
+    text-shadow: 0 2px 6px #000; opacity: 0; transition: opacity .3s;
+  }
+  #prompt {
+    position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%);
+    font-size: 15px; color: #aaf0ff; text-shadow: 0 1px 4px #000;
+    opacity: 0; transition: opacity .2s;
+  }
+  #controls-hint {
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    font-size: 12px; color: rgba(255,255,255,.45); text-shadow: 0 1px 2px #000;
+  }
+  /* 搜索面板 */
+  #search-panel {
+    position: absolute; bottom: 170px; left: 50%; transform: translateX(-50%);
+    display: none; flex-direction: column; gap: 8px; align-items: center;
+    pointer-events: auto;
+  }
+  #search-label { font-size: 14px; color: #ffe9b0; text-shadow: 0 1px 3px #000; }
+  #search-track {
+    width: 260px; height: 12px; border-radius: 6px; overflow: hidden;
+    background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.3);
+  }
+  #search-fill { height: 100%; width: 0%; background: linear-gradient(90deg,#ffd24d,#ffefa0); }
+  #skip-btn {
+    padding: 6px 18px; font-size: 13px; font-weight: 700; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.4); border-radius: 6px;
+    background: rgba(20,26,40,.8); color: #fff;
+  }
+  #skip-btn:hover { background: rgba(50,60,85,.9); }
+  /* BOSS血条 */
+  #boss-bar {
+    position: absolute; top: 52px; left: 50%; transform: translateX(-50%);
+    width: 480px; display: none;
+  }
+  #boss-name {
+    text-align: center; font-size: 15px; font-weight: 700; color: #ff8866;
+    text-shadow: 0 1px 3px #000; margin-bottom: 4px;
+  }
+  #boss-track {
+    height: 13px; border-radius: 7px; overflow: hidden;
+    background: rgba(0,0,0,.6); border: 1px solid rgba(255,120,100,.5);
+  }
+  #boss-fill {
+    height: 100%; width: 100%;
+    background: linear-gradient(90deg,#aa1818,#ff6a3c); transition: width .15s;
+  }
+  #weapon-name {
+    font-size: 12px; color: #b9c4d8; text-shadow: 0 1px 2px #000; margin-top: 2px;
+  }
+  /* 军械库/图鉴 */
+  .shop-row {
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+    background: #1d2235; border: 1px solid rgba(255,255,255,.18);
+    border-radius: 8px; padding: 8px 14px; width: 430px;
+  }
+  .shop-row strong { flex: 1; text-align: left; }
+  .shop-row button {
+    padding: 5px 14px; border: none; border-radius: 6px; cursor: pointer;
+    background: #c8a23c; color: #1d1605; font-weight: 700;
+  }
+  .shop-row button:disabled { background: #555; color: #999; cursor: default; }
+  #gallery {
+    display: flex; flex-wrap: wrap; gap: 6px; max-width: 520px; justify-content: center;
+  }
+  .g-item {
+    width: 44px; height: 44px; border-radius: 7px; font-size: 20px;
+    background: rgba(20,26,40,.8); border: 2px solid rgba(255,255,255,.18);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .g-item.locked { opacity: .35; filter: grayscale(1); }
+  .tab-row { display: flex; gap: 10px; }
+  .tab-btn {
+    padding: 6px 18px; font-size: 14px; cursor: pointer; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,.3); background: rgba(20,26,40,.8); color: #fff;
+  }
+  .tab-btn.active { background: #c8a23c; color: #1d1605; font-weight: 700; }
+  /* 背包 */
+  #bag-panel {
+    position: absolute; left: 14px; bottom: 26px;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  #bag-slots { display: flex; gap: 4px; }
+  .bag-slot {
+    width: 42px; height: 42px; border-radius: 7px; position: relative;
+    background: rgba(10,14,24,.7); border: 2px solid rgba(255,255,255,.18);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .bag-slot .b-icon { font-size: 19px; }
+  .bag-slot .b-val {
+    position: absolute; right: 2px; bottom: 1px; font-size: 9px; color: #ffd24d;
+    text-shadow: 0 1px 2px #000;
+  }
+  #bag-value { font-size: 12px; color: #ffd24d; text-shadow: 0 1px 2px #000; }
+  #con-slots { display: flex; gap: 5px; margin-top: 2px; }
+  .con-slot {
+    display: flex; align-items: center; gap: 4px; padding: 3px 8px;
+    background: rgba(10,14,24,.7); border: 1px solid rgba(255,255,255,.25);
+    border-radius: 6px; font-size: 13px;
+  }
+  .con-slot.empty { opacity: .4; }
+  .con-slot .c-key {
+    width: 15px; height: 15px; border-radius: 3px; background: rgba(255,255,255,.2);
+    font-size: 10px; display: flex; align-items: center; justify-content: center;
+  }
+  .con-slot .c-n { font-size: 11px; color: #b9c4d8; }
+  /* 伤害飘字 */
+  #floater-layer { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  .floater {
+    position: absolute; left: 0; top: 0;
+    font-size: 15px; font-weight: 800; color: #ffd9a0;
+    text-shadow: 0 1px 3px #000; will-change: transform, opacity;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+  }
+  .floater.head { color: #ff5c5c; font-size: 20px; }
+  .floater.coin { color: #ffd24d; }
+  .floater.sanity { color: #7d9bff; }
+  /* 遮罩 */
+  .overlay {
+    position: fixed; inset: 0; display: none;
+    align-items: center; justify-content: center; flex-direction: column; gap: 18px;
+    background: rgba(5,4,8,.85); pointer-events: auto; cursor: auto;
+    font-family: 'Segoe UI', system-ui, sans-serif; color: #fff; z-index: 10;
+  }
+  .overlay h1 { font-size: 44px; text-shadow: 0 3px 10px #000; letter-spacing: 3px; }
+  .overlay .sub { color: #9aa6bd; font-size: 14px; margin-top: -8px; }
+  .big-btn {
+    padding: 13px 42px; font-size: 18px; font-weight: 700;
+    border: none; border-radius: 8px; cursor: pointer;
+    background: #c8a23c; color: #1d1605;
+  }
+  .big-btn:hover { background: #e8c25c; }
+  .door-card, .extract-btn {
+    display: flex; flex-direction: column; gap: 8px; align-items: center;
+    width: 230px; padding: 24px 18px; border-radius: 12px; cursor: pointer;
+    background: #1d2235; border: 2px solid rgba(255,255,255,.22);
+    color: #fff; font-family: inherit; text-align: center;
+    transition: transform .12s, border-color .12s;
+  }
+  .door-card:hover { transform: translateY(-4px); border-color: #ffd24d; }
+  .door-card .door-icon { font-size: 38px; }
+  .door-card strong { font-size: 19px; }
+  .door-card em { font-size: 13px; color: #b9c4d8; font-style: normal; }
+  #choice-cards, #extract-btns { display: flex; gap: 20px; }
+  #extract-coins { font-size: 16px; color: #ffd24d; }
+  #end-stats { font-size: 17px; color: #ddd; text-align: center; line-height: 1.9; }
+  #start-overlay { display: flex; }
+  #start-overlay .rules {
+    font-size: 14px; color: #b9c4d8; line-height: 2; text-align: center;
+  }
+  #bank-text { font-size: 15px; color: #ffd24d; }
+</style>
+</head>
+<body>
+<canvas id="game-canvas"></canvas>
+<div id="vignette"></div>
+<div id="hud">
+  <div id="stat-panel">
+    <div class="sbar"><div id="hp-fill" class="fill"></div><div class="lab">生命</div><div id="hp-text" class="num">100</div></div>
+    <div class="sbar"><div id="san-fill" class="fill"></div><div class="lab">神智</div><div id="san-text" class="num">60</div></div>
+  </div>
+  <div id="state-text">▶ 前进中…</div>
+  <div id="boss-bar"><div id="boss-name"></div><div id="boss-track"><div id="boss-fill"></div></div></div>
+  <div id="run-panel">
+    <div id="coins-text">🪙 0</div>
+    <div id="depth-text">深度 0</div>
+  </div>
+  <div id="ammo-panel">
+    <div id="ammo-text">12 / 12</div>
+    <div id="reload-hint">🔄</div>
+    <div id="weapon-name">🔫 手枪</div>
+    <div id="ammo-sub">左键射击 ｜ R 换弹 ｜ 爆头×3</div>
+  </div>
+  <div id="toast"></div>
+  <div id="prompt"></div>
+  <div id="bag-panel">
+    <div id="bag-value">总价值 0</div>
+    <div id="bag-slots"></div>
+    <div id="con-slots"></div>
+    <div id="skill-slot" class="con-slot" style="display:none"></div>
+  </div>
+  <div id="search-panel">
+    <div id="search-label"></div>
+    <div id="search-track"><div id="search-fill"></div></div>
+    <button id="skip-btn">继续前进 ▶</button>
+  </div>
+  <div id="controls-hint">左键射击 ｜ Q 切枪 ｜ R 换弹 ｜ 1医疗 2镇静 3手雷 4助手技能 ｜ 神智耗尽强制撤离</div>
+</div>
+<div id="crosshair"></div>
+<div id="hitmarker">✕</div>
+<div id="floater-layer"></div>
+<div id="choice-overlay" class="overlay">
+  <h1>选择路线</h1>
+  <div class="sub">两扇门后是不同的命运</div>
+  <div id="choice-cards"></div>
+</div>
+<div id="extract-overlay" class="overlay">
+  <h1>🟢 撤离点</h1>
+  <div id="extract-coins"></div>
+  <div class="sub">撤离可保住全部战利品；继续深入收益更高，但死亡将失去一切</div>
+  <div id="extract-btns">
+    <button id="extract-yes" class="door-card"><span class="door-icon">🏃</span><strong>撤离</strong><em>落袋为安</em></button>
+    <button id="extract-no" class="door-card"><span class="door-icon">⬇️</span><strong>继续深入</strong><em>富贵险中求</em></button>
+  </div>
+</div>
+<div id="bagfull-overlay" class="overlay">
+  <h1>🎒 背包已满</h1>
+  <div id="bagfull-new" class="sub" style="font-size:16px"></div>
+  <div id="bagfull-low" class="sub" style="font-size:16px"></div>
+  <div style="display:flex; gap:20px">
+    <button id="bagfull-replace" class="door-card"><span class="door-icon">🔄</span><strong>丢低换新</strong><em>舍弃最低价值物品</em></button>
+    <button id="bagfull-discard" class="door-card"><span class="door-icon">🚮</span><strong>放弃新物品</strong><em>保持背包不变</em></button>
+  </div>
+</div>
+<div id="intel-overlay" class="overlay">
+  <h1>📋 战前情报</h1>
+  <div id="intel-text" style="font-size:15px; line-height:1.9; text-align:center; color:#d8d2c0"></div>
+  <button id="intel-continue" class="big-btn">准备完毕，前进</button>
+</div>
+<div id="end-overlay" class="overlay">
+  <h1 id="end-title"></h1>
+  <div id="end-stats"></div>
+  <button id="restart-btn" class="big-btn">再探一次</button>
+</div>
+<div id="start-overlay" class="overlay">
+  <h1>古墓不让进</h1>
+  <div class="sub">轻射击 PVE 搜打撤 · V3 ｜ 三章节 · BOSS · 军械库 · 助手 · 图鉴</div>
+  <div id="bank-text"></div>
+  <div class="rules">
+    自动前进，遭遇敌人时停下战斗 —— 鼠标瞄准，左键射击，<b style="color:#ff5c5c">爆头三倍伤害</b><br>
+    宝藏房点击箱子搜刮 ｜ 岔路口二选一 ｜ 每进一房消耗<b style="color:#7d9bff">神智</b><br>
+    撤离点可结算离场 —— <b style="color:#ffd24d">死了战利品就没了</b>
+  </div>
+  <div class="tab-row" id="chapter-row"></div>
+  <div style="display:flex; gap:14px">
+    <button id="start-btn" class="big-btn">进入古墓</button>
+    <button id="checkpoint-btn" class="big-btn" style="display:none; background:#5aa0ff; color:#0a1a33"></button>
+  </div>
+  <div class="tab-row">
+    <button id="tab-armory" class="tab-btn">🛠 军械库</button>
+    <button id="tab-gallery" class="tab-btn">📖 收藏图鉴</button>
+  </div>
+  <div id="armory-panel" style="display:none; flex-direction:column; gap:8px"></div>
+  <div id="gallery" style="display:none"></div>
+</div>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+/*__BUNDLE__*/
+</script>
+</body>
+</html>

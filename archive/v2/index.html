@@ -1,0 +1,2282 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>古墓不让进 — V2 原型</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #07060a; cursor: none; }
+  #game-canvas { display: block; width: 100%; height: 100%; }
+  #hud {
+    position: fixed; inset: 0; pointer-events: none;
+    font-family: 'Segoe UI', system-ui, sans-serif; color: #fff;
+  }
+  /* 暗角（低血/低神智） */
+  #vignette {
+    position: fixed; inset: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 42%, rgba(120,0,10,.75) 100%);
+    transition: opacity .4s;
+  }
+  /* 左上：血量/神智 */
+  #stat-panel {
+    position: absolute; top: 14px; left: 14px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .sbar {
+    width: 220px; height: 16px; border-radius: 8px; overflow: hidden; position: relative;
+    background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.22);
+  }
+  .sbar .fill { height: 100%; transition: width .15s; }
+  #hp-fill { background: linear-gradient(90deg,#a8182a,#e8504d); width: 100%; }
+  #san-fill { background: linear-gradient(90deg,#4455cc,#7d9bff); width: 100%; }
+  .sbar .lab {
+    position: absolute; inset: 0; font-size: 11px; line-height: 16px;
+    padding-left: 8px; text-shadow: 0 1px 2px #000;
+  }
+  .sbar .num {
+    position: absolute; right: 8px; top: 0; font-size: 11px; line-height: 16px;
+    text-shadow: 0 1px 2px #000;
+  }
+  /* 右上：金币/深度 */
+  #run-panel {
+    position: absolute; top: 14px; right: 18px; text-align: right;
+    font-weight: 700; text-shadow: 0 1px 3px #000;
+  }
+  #coins-text { font-size: 20px; color: #ffd24d; }
+  #depth-text { font-size: 14px; color: #b9c4d8; margin-top: 4px; }
+  /* 底中：弹药 */
+  #ammo-panel {
+    position: absolute; bottom: 26px; right: 30px; text-align: right;
+  }
+  #ammo-text { font-size: 30px; font-weight: 800; letter-spacing: 2px; text-shadow: 0 2px 4px #000; }
+  #reload-hint { font-size: 14px; color: #ffd24d; opacity: 0; text-shadow: 0 1px 2px #000; }
+  #ammo-sub { font-size: 11px; color: rgba(255,255,255,.5); }
+  /* 状态标签 */
+  #state-text {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    font-size: 17px; font-weight: 700; color: #e8d9b0; text-shadow: 0 1px 4px #000;
+    letter-spacing: 1px;
+  }
+  /* 准星 */
+  #crosshair {
+    position: fixed; left: -12px; top: -12px; width: 24px; height: 24px;
+    pointer-events: none; will-change: transform;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: rgba(255,255,255,.9);
+  }
+  #crosshair::before { left: 11px; top: 2px; width: 2px; height: 20px; }
+  #crosshair::after { left: 2px; top: 11px; width: 20px; height: 2px; }
+  #hitmarker {
+    position: fixed; left: -10px; top: -28px; pointer-events: none;
+    font-size: 22px; font-weight: 900; opacity: 0; will-change: transform;
+    text-shadow: 0 1px 3px #000;
+  }
+  #toast {
+    position: absolute; top: 90px; left: 50%; transform: translateX(-50%);
+    font-size: 22px; font-weight: 800; color: #ffe34d;
+    text-shadow: 0 2px 6px #000; opacity: 0; transition: opacity .3s;
+  }
+  #prompt {
+    position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%);
+    font-size: 15px; color: #aaf0ff; text-shadow: 0 1px 4px #000;
+    opacity: 0; transition: opacity .2s;
+  }
+  #controls-hint {
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    font-size: 12px; color: rgba(255,255,255,.45); text-shadow: 0 1px 2px #000;
+  }
+  /* 搜索面板 */
+  #search-panel {
+    position: absolute; bottom: 170px; left: 50%; transform: translateX(-50%);
+    display: none; flex-direction: column; gap: 8px; align-items: center;
+    pointer-events: auto;
+  }
+  #search-label { font-size: 14px; color: #ffe9b0; text-shadow: 0 1px 3px #000; }
+  #search-track {
+    width: 260px; height: 12px; border-radius: 6px; overflow: hidden;
+    background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.3);
+  }
+  #search-fill { height: 100%; width: 0%; background: linear-gradient(90deg,#ffd24d,#ffefa0); }
+  #skip-btn {
+    padding: 6px 18px; font-size: 13px; font-weight: 700; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.4); border-radius: 6px;
+    background: rgba(20,26,40,.8); color: #fff;
+  }
+  #skip-btn:hover { background: rgba(50,60,85,.9); }
+  /* 背包 */
+  #bag-panel {
+    position: absolute; left: 14px; bottom: 26px;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  #bag-slots { display: flex; gap: 4px; }
+  .bag-slot {
+    width: 42px; height: 42px; border-radius: 7px; position: relative;
+    background: rgba(10,14,24,.7); border: 2px solid rgba(255,255,255,.18);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .bag-slot .b-icon { font-size: 19px; }
+  .bag-slot .b-val {
+    position: absolute; right: 2px; bottom: 1px; font-size: 9px; color: #ffd24d;
+    text-shadow: 0 1px 2px #000;
+  }
+  #bag-value { font-size: 12px; color: #ffd24d; text-shadow: 0 1px 2px #000; }
+  #con-slots { display: flex; gap: 5px; margin-top: 2px; }
+  .con-slot {
+    display: flex; align-items: center; gap: 4px; padding: 3px 8px;
+    background: rgba(10,14,24,.7); border: 1px solid rgba(255,255,255,.25);
+    border-radius: 6px; font-size: 13px;
+  }
+  .con-slot.empty { opacity: .4; }
+  .con-slot .c-key {
+    width: 15px; height: 15px; border-radius: 3px; background: rgba(255,255,255,.2);
+    font-size: 10px; display: flex; align-items: center; justify-content: center;
+  }
+  .con-slot .c-n { font-size: 11px; color: #b9c4d8; }
+  /* 伤害飘字 */
+  #floater-layer { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  .floater {
+    position: absolute; left: 0; top: 0;
+    font-size: 15px; font-weight: 800; color: #ffd9a0;
+    text-shadow: 0 1px 3px #000; will-change: transform, opacity;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+  }
+  .floater.head { color: #ff5c5c; font-size: 20px; }
+  .floater.coin { color: #ffd24d; }
+  .floater.sanity { color: #7d9bff; }
+  /* 遮罩 */
+  .overlay {
+    position: fixed; inset: 0; display: none;
+    align-items: center; justify-content: center; flex-direction: column; gap: 18px;
+    background: rgba(5,4,8,.85); pointer-events: auto; cursor: auto;
+    font-family: 'Segoe UI', system-ui, sans-serif; color: #fff; z-index: 10;
+  }
+  .overlay h1 { font-size: 44px; text-shadow: 0 3px 10px #000; letter-spacing: 3px; }
+  .overlay .sub { color: #9aa6bd; font-size: 14px; margin-top: -8px; }
+  .big-btn {
+    padding: 13px 42px; font-size: 18px; font-weight: 700;
+    border: none; border-radius: 8px; cursor: pointer;
+    background: #c8a23c; color: #1d1605;
+  }
+  .big-btn:hover { background: #e8c25c; }
+  .door-card, .extract-btn {
+    display: flex; flex-direction: column; gap: 8px; align-items: center;
+    width: 230px; padding: 24px 18px; border-radius: 12px; cursor: pointer;
+    background: #1d2235; border: 2px solid rgba(255,255,255,.22);
+    color: #fff; font-family: inherit; text-align: center;
+    transition: transform .12s, border-color .12s;
+  }
+  .door-card:hover { transform: translateY(-4px); border-color: #ffd24d; }
+  .door-card .door-icon { font-size: 38px; }
+  .door-card strong { font-size: 19px; }
+  .door-card em { font-size: 13px; color: #b9c4d8; font-style: normal; }
+  #choice-cards, #extract-btns { display: flex; gap: 20px; }
+  #extract-coins { font-size: 16px; color: #ffd24d; }
+  #end-stats { font-size: 17px; color: #ddd; text-align: center; line-height: 1.9; }
+  #start-overlay { display: flex; }
+  #start-overlay .rules {
+    font-size: 14px; color: #b9c4d8; line-height: 2; text-align: center;
+  }
+  #bank-text { font-size: 15px; color: #ffd24d; }
+</style>
+</head>
+<body>
+<canvas id="game-canvas"></canvas>
+<div id="vignette"></div>
+<div id="hud">
+  <div id="stat-panel">
+    <div class="sbar"><div id="hp-fill" class="fill"></div><div class="lab">生命</div><div id="hp-text" class="num">100</div></div>
+    <div class="sbar"><div id="san-fill" class="fill"></div><div class="lab">神智</div><div id="san-text" class="num">60</div></div>
+  </div>
+  <div id="state-text">▶ 前进中…</div>
+  <div id="run-panel">
+    <div id="coins-text">🪙 0</div>
+    <div id="depth-text">深度 0</div>
+  </div>
+  <div id="ammo-panel">
+    <div id="ammo-text">12 / 12</div>
+    <div id="reload-hint">🔄</div>
+    <div id="ammo-sub">左键射击 ｜ R 换弹 ｜ 爆头×3</div>
+  </div>
+  <div id="toast"></div>
+  <div id="prompt"></div>
+  <div id="bag-panel">
+    <div id="bag-value">总价值 0</div>
+    <div id="bag-slots"></div>
+    <div id="con-slots"></div>
+  </div>
+  <div id="search-panel">
+    <div id="search-label"></div>
+    <div id="search-track"><div id="search-fill"></div></div>
+    <button id="skip-btn">继续前进 ▶</button>
+  </div>
+  <div id="controls-hint">左键射击 ｜ R 换弹 ｜ 1 医疗 2 镇静 3 手雷 ｜ 重甲怪要打头 ｜ 神智耗尽强制撤离</div>
+</div>
+<div id="crosshair"></div>
+<div id="hitmarker">✕</div>
+<div id="floater-layer"></div>
+<div id="choice-overlay" class="overlay">
+  <h1>选择路线</h1>
+  <div class="sub">两扇门后是不同的命运</div>
+  <div id="choice-cards"></div>
+</div>
+<div id="extract-overlay" class="overlay">
+  <h1>🟢 撤离点</h1>
+  <div id="extract-coins"></div>
+  <div class="sub">撤离可保住全部战利品；继续深入收益更高，但死亡将失去一切</div>
+  <div id="extract-btns">
+    <button id="extract-yes" class="door-card"><span class="door-icon">🏃</span><strong>撤离</strong><em>落袋为安</em></button>
+    <button id="extract-no" class="door-card"><span class="door-icon">⬇️</span><strong>继续深入</strong><em>富贵险中求</em></button>
+  </div>
+</div>
+<div id="bagfull-overlay" class="overlay">
+  <h1>🎒 背包已满</h1>
+  <div id="bagfull-new" class="sub" style="font-size:16px"></div>
+  <div id="bagfull-low" class="sub" style="font-size:16px"></div>
+  <div style="display:flex; gap:20px">
+    <button id="bagfull-replace" class="door-card"><span class="door-icon">🔄</span><strong>丢低换新</strong><em>舍弃最低价值物品</em></button>
+    <button id="bagfull-discard" class="door-card"><span class="door-icon">🚮</span><strong>放弃新物品</strong><em>保持背包不变</em></button>
+  </div>
+</div>
+<div id="intel-overlay" class="overlay">
+  <h1>📋 战前情报</h1>
+  <div id="intel-text" style="font-size:15px; line-height:1.9; text-align:center; color:#d8d2c0"></div>
+  <button id="intel-continue" class="big-btn">准备完毕，前进</button>
+</div>
+<div id="end-overlay" class="overlay">
+  <h1 id="end-title"></h1>
+  <div id="end-stats"></div>
+  <button id="restart-btn" class="big-btn">再探一次</button>
+</div>
+<div id="start-overlay" class="overlay">
+  <h1>古墓不让进</h1>
+  <div class="sub">轻射击 PVE 搜打撤 · V2 原型 ｜ 背包管理 · 多种敌人 · 安全屋</div>
+  <div id="bank-text"></div>
+  <div class="rules">
+    自动前进，遭遇敌人时停下战斗 —— 鼠标瞄准，左键射击，<b style="color:#ff5c5c">爆头三倍伤害</b><br>
+    宝藏房点击箱子搜刮 ｜ 岔路口二选一 ｜ 每进一房消耗<b style="color:#7d9bff">神智</b><br>
+    撤离点可结算离场 —— <b style="color:#ffd24d">死了战利品就没了</b>
+  </div>
+  <div style="display:flex; gap:14px">
+    <button id="start-btn" class="big-btn">进入古墓</button>
+    <button id="checkpoint-btn" class="big-btn" style="display:none; background:#5aa0ff; color:#0a1a33"></button>
+  </div>
+</div>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+// ===== input.ts =====
+
+// 鼠标瞄准 + 按键。射击为点击触发，换弹R。
+class Input {
+  // 归一化鼠标位置（NDC，-1~1）
+  mouseNDC                = new THREE.Vector2(0, 0);
+  mousePx                           = { x: 0, y: 0 };
+          keys              = new Set();
+          pressed              = new Set();
+          clicked          = false;
+          mouseDown          = false;
+
+  constructor(canvas                   ) {
+    window.addEventListener('mousemove', (e            ) => {
+      this.mousePx.x = e.clientX;
+      this.mousePx.y = e.clientY;
+      this.mouseNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
+      this.mouseNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    });
+    canvas.addEventListener('mousedown', (e            ) => {
+      if (e.button === 0) {
+        this.clicked = true;
+        this.mouseDown = true;
+      }
+    });
+    window.addEventListener('mouseup', (e            ) => {
+      if (e.button === 0) this.mouseDown = false;
+    });
+    window.addEventListener('keydown', (e               ) => {
+      if (!this.keys.has(e.code)) this.pressed.add(e.code);
+      this.keys.add(e.code);
+    });
+    window.addEventListener('keyup', (e               ) => this.keys.delete(e.code));
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.mouseDown = false;
+    });
+    window.addEventListener('contextmenu', (e            ) => e.preventDefault());
+  }
+
+  // 本帧是否点击（消费式）
+  consumeClick()          {
+    const c = this.clicked;
+    this.clicked = false;
+    return c;
+  }
+
+  isFiring()          {
+    return this.mouseDown;
+  }
+
+  wasPressed(code        )          {
+    if (this.pressed.has(code)) {
+      this.pressed.delete(code);
+      return true;
+    }
+    return false;
+  }
+
+  endFrame()       {
+    this.pressed.clear();
+    this.clicked = false;
+  }
+}
+
+
+// ===== audio.ts =====
+// 程序化音效 + 微恐环境音（WebAudio）
+class AudioFX {
+          ctx                      = null;
+          master                  = null;
+          droneOsc                   = [];
+          groanTimer         = 6;
+          heartTimer         = 0;
+
+  init()       {
+    if (!this.ctx) {
+      const AC = (window       ).AudioContext || (window       ).webkitAudioContext;
+      this.ctx = new AC();
+      this.master = this.ctx .createGain();
+      this.master.gain.value = 1;
+      this.master.connect(this.ctx .destination);
+    }
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+  }
+
+          beep(
+    freq        , dur        , type                , vol        , slideTo         , delay         = 0
+  )       {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime + delay;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (slideTo !== undefined) osc.frequency.exponentialRampToValueAtTime(Math.max(1, slideTo), t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    osc.connect(g).connect(this.master);
+    osc.start(t);
+    osc.stop(t + dur);
+  }
+
+  // 噪声爆发（枪声主体）
+          noise(dur        , vol        , lowpass        , delay         = 0)       {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime + delay;
+    const len = Math.floor(this.ctx.sampleRate * dur);
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    }
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = lowpass;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(filter).connect(g).connect(this.master);
+    src.start(t);
+  }
+
+  gunshot()       {
+    this.noise(0.16, 0.4, 2200);
+    this.beep(160, 0.1, 'square', 0.16, 50);
+  }
+  dryFire()       { this.beep(900, 0.04, 'square', 0.05); }
+  reloadStart()       { this.beep(500, 0.06, 'square', 0.07, 300); }
+  reloadEnd()       {
+    this.beep(700, 0.05, 'square', 0.08);
+    this.beep(1100, 0.06, 'square', 0.07, undefined, 0.07);
+  }
+  hit()       { this.beep(220, 0.05, 'sawtooth', 0.07, 100); }
+  headshot()       {
+    this.beep(1500, 0.07, 'square', 0.1, 2200);
+    this.noise(0.08, 0.18, 4000);
+  }
+  zombieDie()       { this.beep(120, 0.4, 'sawtooth', 0.12, 40); }
+  zombieGroan(vol         = 0.07)       {
+    this.beep(75 + Math.random() * 40, 0.7, 'sawtooth', vol, 55);
+  }
+  meleeHit()       {
+    this.noise(0.12, 0.3, 800);
+    this.beep(90, 0.2, 'sawtooth', 0.14, 45);
+  }
+  loot()       { this.beep(880, 0.08, 'sine', 0.08, 1320); }
+  coin()       {
+    this.beep(1180, 0.05, 'square', 0.05);
+    this.beep(1560, 0.08, 'square', 0.05, undefined, 0.05);
+  }
+  doorOpen()       {
+    this.noise(0.4, 0.12, 500);
+    this.beep(70, 0.45, 'sine', 0.1, 45);
+  }
+  searchTick()       { this.beep(600, 0.03, 'square', 0.03); }
+  altar()       {
+    this.beep(440, 0.3, 'sine', 0.09, 880);
+    this.beep(660, 0.4, 'sine', 0.07, 1320, 0.15);
+  }
+  sanityHit()       { this.beep(2300, 0.25, 'sine', 0.06, 200); }
+  extractOk()       {
+    this.beep(523, 0.12, 'triangle', 0.1);
+    this.beep(659, 0.12, 'triangle', 0.1, undefined, 0.12);
+    this.beep(784, 0.12, 'triangle', 0.1, undefined, 0.24);
+    this.beep(1046, 0.3, 'triangle', 0.12, undefined, 0.36);
+  }
+  death()       { this.beep(300, 0.8, 'sawtooth', 0.14, 40); }
+  heartbeat()       {
+    this.beep(55, 0.1, 'sine', 0.22, 40);
+    this.beep(50, 0.12, 'sine', 0.18, 35, 0.18);
+  }
+
+  // 暗黑低音垫（持续环境音）
+  startAmbient()       {
+    if (!this.ctx || !this.master || this.droneOsc.length > 0) return;
+    const g = this.ctx.createGain();
+    g.gain.value = 0.035;
+    g.connect(this.master);
+    for (const f of [55, 55.7, 110.3]) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = f;
+      const og = this.ctx.createGain();
+      og.gain.value = f > 100 ? 0.3 : 1;
+      o.connect(og).connect(g);
+      o.start();
+      this.droneOsc.push(o);
+    }
+  }
+
+  // 每帧：随机远处低吼 + 低神智心跳
+  updateAmbient(dt        , sanityRatio        )       {
+    this.groanTimer -= dt;
+    if (this.groanTimer <= 0) {
+      this.groanTimer = 5 + Math.random() * 9;
+      this.zombieGroan(0.03 + Math.random() * 0.03);
+    }
+    if (sanityRatio < 0.35) {
+      this.heartTimer -= dt;
+      if (this.heartTimer <= 0) {
+        this.heartTimer = 0.6 + sanityRatio * 1.6;
+        this.heartbeat();
+      }
+    }
+  }
+}
+
+
+// ===== meta.ts =====
+// 局外持久化：金库、最深记录
+                           
+                            
+                    
+               
+                   
+                                 
+ 
+
+const KEY = 'tomb_meta_v1';
+
+class Meta {
+  data          ;
+
+  constructor() {
+    this.data = { bank: 0, bestDepth: 0, runs: 0, extracts: 0, checkpoint: 0 };
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (typeof p.bank === 'number') this.data = { ...this.data, ...p };
+      }
+    } catch (e) { /* 降级单次会话 */ }
+  }
+
+  save()       {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(this.data));
+    } catch (e) { /* ignore */ }
+  }
+}
+
+
+// ===== items.ts =====
+// 物品/背包系统（策划案"背包与容量管理"：总空间 + 消耗品独立槽）
+                                                           
+
+const RARITY_INFO                                                  = {
+  common: { name: '普通', color: '#cfcfcf' },
+  rare:   { name: '稀有', color: '#5aa0ff' },
+  epic:   { name: '史诗', color: '#b46aff' },
+  legend: { name: '传说', color: '#ffd24d' },
+};
+
+                               
+               
+               
+                 
+                
+ 
+
+const TREASURES                                                                 = [
+  { name: '古旧铜币', icon: '🪙', rarity: 'common', base: 12 },
+  { name: '陶土小像', icon: '🗿', rarity: 'common', base: 16 },
+  { name: '褪色壁画残片', icon: '🧱', rarity: 'common', base: 14 },
+  { name: '青玉佩', icon: '🟢', rarity: 'rare', base: 42 },
+  { name: '银质香炉', icon: '🏺', rarity: 'rare', base: 55 },
+  { name: '象牙骨笛', icon: '🦴', rarity: 'rare', base: 48 },
+  { name: '黄金面具', icon: '👺', rarity: 'epic', base: 120 },
+  { name: '翡翠圣甲虫', icon: '🪲', rarity: 'epic', base: 140 },
+  { name: '法老权杖', icon: '🪄', rarity: 'legend', base: 300 },
+  { name: '失落王冠', icon: '👑', rarity: 'legend', base: 360 },
+];
+
+function rollTreasure(depth        )               {
+  // 深度越深，高品质权重越大
+  const r = Math.random();
+  const legendP = Math.min(0.1, 0.01 + depth * 0.004);
+  const epicP = Math.min(0.24, 0.06 + depth * 0.008);
+  const rareP = Math.min(0.42, 0.22 + depth * 0.008);
+  let rarity         = 'common';
+  if (r < legendP) rarity = 'legend';
+  else if (r < legendP + epicP) rarity = 'epic';
+  else if (r < legendP + epicP + rareP) rarity = 'rare';
+  const pool = TREASURES.filter((t) => t.rarity === rarity);
+  const t = pool[Math.floor(Math.random() * pool.length)];
+  const value = Math.round(t.base * (1 + depth * 0.06) * (0.85 + Math.random() * 0.3));
+  return { name: t.name, icon: t.icon, rarity: t.rarity, value };
+}
+
+                                                            
+
+const CONSUMABLE_INFO                                                                                                 = {
+  med:      { name: '医疗包', icon: '🩹', key: '1', cap: 3, desc: '+35 生命' },
+  sedative: { name: '镇静剂', icon: '💊', key: '2', cap: 2, desc: '+15 神智' },
+  grenade:  { name: '手雷',   icon: '💣', key: '3', cap: 3, desc: '范围爆炸' },
+};
+
+class Backpack {
+           cap         = 8;
+  items                 = [];
+  consumables                                 = { med: 1, sedative: 0, grenade: 1 };
+
+  get totalValue()         {
+    return this.items.reduce((s, i) => s + i.value, 0);
+  }
+
+  get isFull()          {
+    return this.items.length >= this.cap;
+  }
+
+  add(item              )          {
+    if (this.isFull) return false;
+    this.items.push(item);
+    return true;
+  }
+
+  lowestItem()                      {
+    if (this.items.length === 0) return null;
+    return this.items.reduce((a, b) => (a.value <= b.value ? a : b));
+  }
+
+  // 丢掉最低价值物品换新（返回被丢的物品）
+  replaceLowest(item              )                      {
+    const low = this.lowestItem();
+    if (!low) return null;
+    this.items.splice(this.items.indexOf(low), 1);
+    this.items.push(item);
+    return low;
+  }
+
+  addConsumable(kind                )          {
+    if (this.consumables[kind] >= CONSUMABLE_INFO[kind].cap) return false;
+    this.consumables[kind] += 1;
+    return true;
+  }
+
+  useConsumable(kind                )          {
+    if (this.consumables[kind] <= 0) return false;
+    this.consumables[kind] -= 1;
+    return true;
+  }
+}
+
+// 搜索掉落：宝物 / 消耗品 / 强化弹药
+                        
+                                            
+                                               
+                     
+
+function rollSearchDrop(depth        )             {
+  const r = Math.random();
+  if (r < 0.55) return { kind: 'treasure', item: rollTreasure(depth) };
+  if (r < 0.85) {
+    const r2 = Math.random();
+    const con                 = r2 < 0.45 ? 'med' : r2 < 0.7 ? 'sedative' : 'grenade';
+    return { kind: 'consumable', con };
+  }
+  return { kind: 'ammo' };
+}
+
+
+// ===== rooms.ts =====
+
+// 房间类型（策划案"场景"表）
+                                                                                                        
+
+const ROOM_INFO                                                               = {
+  combat:   { name: '战斗', icon: '⚔️', hint: '有敌人盘踞，消灭后可获得奖励' },
+  treasure: { name: '宝藏', icon: '📦', hint: '可以搜刮战利品' },
+  altar:    { name: '祭坛', icon: '🔮', hint: '获取局内强化' },
+  corridor: { name: '回廊', icon: '🚪', hint: '连通通道，可能有敌人出没' },
+  extract:  { name: '撤离点', icon: '🟢', hint: '可以安全撤离' },
+  safehouse:{ name: '安全屋', icon: '🏕️', hint: '没有敌人，休整并记录检查点' },
+  elite:    { name: '精英巢穴', icon: '💀', hint: '强敌盘踞，掉落高价值战利品' },
+};
+
+                       
+                 
+                                
+                     
+                                 
+                              
+                                 
+                 
+                                  
+                               
+                              
+                   
+ 
+
+const WIDTH = 11;
+const HEIGHT = 5.2;
+
+// 共享石材纹理
+let stoneTex                             = null;
+function getStoneTex()                      {
+  if (stoneTex) return stoneTex;
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const g = c.getContext('2d') ;
+  g.fillStyle = '#5a4d3b';
+  g.fillRect(0, 0, 128, 128);
+  // 砖缝
+  g.strokeStyle = '#473c2e';
+  g.lineWidth = 2;
+  for (let y = 0; y < 128; y += 32) {
+    g.beginPath(); g.moveTo(0, y); g.lineTo(128, y); g.stroke();
+    const off = (y / 32) % 2 === 0 ? 0 : 32;
+    for (let x = off; x < 128; x += 64) {
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x, y + 32); g.stroke();
+    }
+  }
+  // 噪点风化
+  for (let i = 0; i < 500; i++) {
+    g.fillStyle = `rgba(30,24,16,${0.05 + Math.random() * 0.1})`;
+    g.fillRect(Math.random() * 128, Math.random() * 128, 2, 2);
+  }
+  stoneTex = new THREE.CanvasTexture(c);
+  stoneTex.wrapS = THREE.RepeatWrapping;
+  stoneTex.wrapT = THREE.RepeatWrapping;
+  return stoneTex;
+}
+
+class Dungeon {
+  rooms         = [];
+          scene             ;
+          nextZ         = 0; // 下一个房间入口z
+          depthCount         = 0;
+
+  constructor(scene             , startDepth         = 0) {
+    this.scene = scene;
+    this.depthCount = startDepth;
+  }
+
+  get currentDepth()         {
+    return this.depthCount;
+  }
+
+  // 决定下一房间候选（每3间出岔路二选一；第10/20/30…间为撤离点）
+  nextOptions()             {
+    const d = this.depthCount + 1;
+    if (d % 10 === 0) return ['extract'];
+    if (d % 10 === 5) return ['safehouse'];
+    if (d % 10 === 8) return ['elite'];
+    if (d % 3 === 0) {
+      // 岔路二选一
+      const pool             = ['combat', 'treasure', 'altar', 'corridor'];
+      const a = pool[Math.floor(Math.random() * pool.length)];
+      let b = pool[Math.floor(Math.random() * pool.length)];
+      if (b === a) b = pool[(pool.indexOf(a) + 1) % pool.length];
+      return [a, b];
+    }
+    const r = Math.random();
+    if (r < 0.45) return ['combat'];
+    if (r < 0.7) return ['treasure'];
+    if (r < 0.82) return ['altar'];
+    return ['corridor'];
+  }
+
+  append(type          )       {
+    this.depthCount += 1;
+    const length = type === 'corridor' ? 10 : type === 'extract' ? 12 : type === 'safehouse' ? 11 : 15;
+    const zEntry = this.nextZ;
+    const zExit = zEntry - length;
+    this.nextZ = zExit;
+
+    const group = new THREE.Group();
+    const tex = getStoneTex();
+    const wallMat = new THREE.MeshStandardMaterial({ map: tex, color: 0x8a7a60 });
+    const floorMat = new THREE.MeshStandardMaterial({ map: tex, color: 0x6b5d48 });
+    const w = type === 'corridor' ? 5 : WIDTH;
+
+    // 地板/天花
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.3, length), floorMat);
+    floor.position.set(0, -0.15, zEntry - length / 2);
+    floor.receiveShadow = true;
+    group.add(floor);
+    const ceil = new THREE.Mesh(new THREE.BoxGeometry(w, 0.3, length),
+      new THREE.MeshStandardMaterial({ map: tex, color: 0x3a3228 }));
+    ceil.position.set(0, HEIGHT, zEntry - length / 2);
+    group.add(ceil);
+
+    // 侧墙
+    const wallGeo = new THREE.BoxGeometry(0.4, HEIGHT, length);
+    const wl = new THREE.Mesh(wallGeo, wallMat);
+    wl.position.set(-w / 2, HEIGHT / 2, zEntry - length / 2);
+    group.add(wl);
+    const wr = new THREE.Mesh(wallGeo, wallMat);
+    wr.position.set(w / 2, HEIGHT / 2, zEntry - length / 2);
+    group.add(wr);
+
+    // 端墙（带门洞：左右两块+门楣）
+    const doorW = 2.2;
+    const endWallSide = new THREE.BoxGeometry((w - doorW) / 2, HEIGHT, 0.4);
+    const el = new THREE.Mesh(endWallSide, wallMat);
+    el.position.set(-(doorW / 2 + (w - doorW) / 4), HEIGHT / 2, zExit);
+    group.add(el);
+    const er = new THREE.Mesh(endWallSide, wallMat);
+    er.position.set(doorW / 2 + (w - doorW) / 4, HEIGHT / 2, zExit);
+    group.add(er);
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(doorW, HEIGHT - 3.2, 0.4), wallMat);
+    lintel.position.set(0, HEIGHT - (HEIGHT - 3.2) / 2, zExit);
+    group.add(lintel);
+    // 门洞内的黑暗
+    const dark = new THREE.Mesh(
+      new THREE.PlaneGeometry(doorW, 3.2),
+      new THREE.MeshBasicMaterial({ color: 0x000000 })
+    );
+    dark.position.set(0, 1.6, zExit - 0.25);
+    group.add(dark);
+
+    // 火把（带光源，限2个控制性能）
+    const torches                     = [];
+    const torchGeo = new THREE.CylinderGeometry(0.05, 0.08, 0.6, 6);
+    const torchMat = new THREE.MeshStandardMaterial({ color: 0x4a3520 });
+    for (const side of [-1, 1]) {
+      const tz = zEntry - length * 0.45;
+      const torch = new THREE.Mesh(torchGeo, torchMat);
+      torch.position.set(side * (w / 2 - 0.35), 2.6, tz);
+      torch.rotation.z = -side * 0.3;
+      group.add(torch);
+      const flame = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 6, 5),
+        new THREE.MeshBasicMaterial({ color: 0xffaa33 })
+      );
+      flame.position.set(side * (w / 2 - 0.42), 2.95, tz);
+      group.add(flame);
+      const light = new THREE.PointLight(0xff8830, 6, 12, 1.6);
+      light.position.copy(flame.position);
+      group.add(light);
+      torches.push(light);
+    }
+
+    // 类型化布置
+    const crates               = [];
+    if (type === 'treasure') {
+      const crateGeo = new THREE.BoxGeometry(1.1, 0.9, 0.85);
+      const crateMat = new THREE.MeshStandardMaterial({ color: 0x7a5a30 });
+      const n = 2 + Math.floor(Math.random() * 2);
+      for (let i = 0; i < n; i++) {
+        const crate = new THREE.Mesh(crateGeo, crateMat.clone());
+        const side = i % 2 === 0 ? -1 : 1;
+        crate.position.set(
+          side * (2.2 + Math.random() * 1.6),
+          0.45,
+          zEntry - 4 - i * 3.2
+        );
+        crate.rotation.y = Math.random() * 0.6 - 0.3;
+        crate.castShadow = true;
+        crate.userData.crate = true;
+        crate.userData.searched = false;
+        group.add(crate);
+        crates.push(crate);
+      }
+      // 金光点缀
+      const glow = new THREE.PointLight(0xffd24d, 2, 8, 2);
+      glow.position.set(0, 1.5, zEntry - length / 2);
+      group.add(glow);
+    } else if (type === 'altar') {
+      const pillar = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.5, 0.7, 1.6, 8),
+        new THREE.MeshStandardMaterial({ color: 0x55607a })
+      );
+      pillar.position.set(0, 0.8, zEntry - length / 2 - 1);
+      group.add(pillar);
+      const orb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.35, 12, 10),
+        new THREE.MeshStandardMaterial({ color: 0x8fb8ff, emissive: 0x2244aa })
+      );
+      orb.position.set(0, 2.0, zEntry - length / 2 - 1);
+      orb.userData.altarOrb = true;
+      group.add(orb);
+      const light = new THREE.PointLight(0x6688ff, 4, 10, 1.8);
+      light.position.copy(orb.position);
+      group.add(light);
+    } else if (type === 'extract') {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(1.3, 0.12, 8, 24),
+        new THREE.MeshStandardMaterial({ color: 0x35e07a, emissive: 0x117733 })
+      );
+      ring.position.set(0, 1.8, zExit + 2.5);
+      group.add(ring);
+      const light = new THREE.PointLight(0x35e07a, 6, 12, 1.6);
+      light.position.copy(ring.position);
+      group.add(light);
+    } else if (type === 'safehouse') {
+      // 篝火 + 暖光
+      const fire = new THREE.Mesh(
+        new THREE.ConeGeometry(0.3, 0.5, 6),
+        new THREE.MeshBasicMaterial({ color: 0xffaa33 })
+      );
+      fire.position.set(0, 0.25, zEntry - length / 2);
+      group.add(fire);
+      const logs = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.06, 0.9, 5),
+        new THREE.MeshStandardMaterial({ color: 0x5a4025 })
+      );
+      logs.rotation.z = Math.PI / 2;
+      logs.position.set(0, 0.06, zEntry - length / 2);
+      group.add(logs);
+      const warm = new THREE.PointLight(0xffa040, 8, 14, 1.4);
+      warm.position.set(0, 1.4, zEntry - length / 2);
+      group.add(warm);
+      // 床铺
+      const bed = new THREE.Mesh(
+        new THREE.BoxGeometry(0.9, 0.12, 2),
+        new THREE.MeshStandardMaterial({ color: 0x6a3a3a })
+      );
+      bed.position.set(-3.4, 0.06, zEntry - length / 2 - 1);
+      group.add(bed);
+    } else if (type === 'elite') {
+      // 骷髅警示 + 红光
+      const skullMat = new THREE.MeshStandardMaterial({ color: 0xd8cfb8 });
+      for (const sx of [-2.2, 2.2]) {
+        const skull = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), skullMat);
+        skull.position.set(sx, 1.1, zEntry - 2);
+        group.add(skull);
+        const spike = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 1.0, 5), skullMat);
+        spike.position.set(sx, 0.5, zEntry - 2);
+        group.add(spike);
+      }
+      const red = new THREE.PointLight(0xff2233, 5, 13, 1.6);
+      red.position.set(0, 2.6, zEntry - length / 2);
+      group.add(red);
+    } else if (type === 'combat') {
+      // 残骸装饰
+      const boneMat = new THREE.MeshStandardMaterial({ color: 0xd8cfb8 });
+      for (let i = 0; i < 3; i++) {
+        const bone = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.7, 5), boneMat);
+        bone.position.set(
+          (Math.random() - 0.5) * (w - 3), 0.06,
+          zEntry - 2 - Math.random() * (length - 4)
+        );
+        bone.rotation.set(Math.PI / 2, 0, Math.random() * Math.PI);
+        group.add(bone);
+      }
+    }
+
+    this.scene.add(group);
+    const room       = {
+      type,
+      depth: this.depthCount,
+      group,
+      zEntry,
+      zCenter: zEntry - length / 2,
+      zExit,
+      length,
+      crates,
+      searched: 0,
+      torches,
+      cleared: false,
+    };
+    this.rooms.push(room);
+
+    // 只保留最近4个房间
+    while (this.rooms.length > 4) {
+      const old = this.rooms.shift() ;
+      this.scene.remove(old.group);
+      old.group.traverse((o                ) => {
+        const m = o              ;
+        if (m.geometry) m.geometry.dispose();
+      });
+    }
+    return room;
+  }
+
+  // 火把闪烁
+  flicker(time        )       {
+    for (const room of this.rooms) {
+      for (let i = 0; i < room.torches.length; i++) {
+        const t = room.torches[i];
+        t.intensity = 5 + Math.sin(time * 9 + i * 2.7 + room.depth) * 1.2 + Math.random() * 0.6;
+      }
+    }
+  }
+}
+
+
+// ===== enemy.ts =====
+
+// 敌人种类（策划案"敌人"表）：普通/高速/远程/重甲/精神/精英
+                                                                                      
+
+                    
+               
+                 
+                    
+                
+                             
+                                         
+                    
+                  
+                                
+                  
+ 
+
+const KIND_CONF                               = {
+  normal:  { name: '食尸鬼',   hpMult: 1,   speedMult: 1,    scale: 1,    hue: 0.27, bodyArmor: 1,    touchMult: 1,   ranged: false, psychic: false, opacity: 1 },
+  fast:    { name: '开膛手',   hpMult: 0.6, speedMult: 2.1,  scale: 0.85, hue: 0.09, bodyArmor: 1,    touchMult: 0.8, ranged: false, psychic: false, opacity: 1 },
+  ranged:  { name: '追踪者',   hpMult: 0.8, speedMult: 0.8,  scale: 1,    hue: 0.55, bodyArmor: 1,    touchMult: 0.8, ranged: true,  psychic: false, opacity: 1 },
+  heavy:   { name: '再生者',   hpMult: 3.8, speedMult: 0.55, scale: 1.35, hue: 0.0,  bodyArmor: 0.4,  touchMult: 1.8, ranged: false, psychic: false, opacity: 1 },
+  psychic: { name: '无形之子', hpMult: 0.7, speedMult: 0.9,  scale: 1.05, hue: 0.72, bodyArmor: 1,    touchMult: 0,   ranged: false, psychic: true,  opacity: 0.45 },
+  elite:   { name: '巨人',     hpMult: 8,   speedMult: 0.7,  scale: 1.9,  hue: 0.83, bodyArmor: 0.7,  touchMult: 2.4, ranged: false, psychic: false, opacity: 1 },
+};
+
+// 近战结果：0无 1扣血 2扣神智
+class Zombie {
+  mesh             ;
+  head            ;
+  body            ;
+  kind            ;
+  conf          ;
+  hp        ;
+  maxHp        ;
+  speed        ;
+  dead          = false;
+  removed          = false;
+          attackTimer         = 0;
+          shootTimer         = 2;
+          deathTimer         = 0;
+          bobPhase         = Math.random() * Math.PI * 2;
+          bodyMat                            ;
+          headMat                            ;
+          flashTimer         = 0;
+
+  onShoot                                           = null;
+
+  constructor(scene             , pos               , depth        , kind            ) {
+    this.kind = kind;
+    const c = KIND_CONF[kind];
+    this.conf = c;
+    this.maxHp = Math.round((12 + depth * 3) * c.hpMult);
+    this.hp = this.maxHp;
+    this.speed = (1.5 + Math.random() * 0.5 + Math.min(1.2, depth * 0.06)) * c.speedMult;
+
+    this.mesh = new THREE.Group();
+    const skin = new THREE.Color().setHSL(c.hue, kind === 'heavy' ? 0.1 : 0.35, kind === 'heavy' ? 0.25 : 0.32);
+    this.bodyMat = new THREE.MeshStandardMaterial({
+      color: skin, transparent: c.opacity < 1, opacity: c.opacity,
+    });
+    this.headMat = new THREE.MeshStandardMaterial({
+      color: skin.clone().offsetHSL(0, 0, 0.07), transparent: c.opacity < 1, opacity: c.opacity,
+    });
+
+    const s = c.scale;
+    this.body = new THREE.Mesh(new THREE.BoxGeometry(0.62 * s, 1.05 * s, 0.4 * s), this.bodyMat);
+    this.body.position.y = 0.95 * s;
+    this.body.userData.part = 'body';
+    this.body.userData.zombie = this;
+    this.mesh.add(this.body);
+
+    this.head = new THREE.Mesh(new THREE.SphereGeometry(0.21 * s, 10, 8), this.headMat);
+    this.head.position.y = 1.72 * s;
+    this.head.userData.part = 'head';
+    this.head.userData.zombie = this;
+    this.mesh.add(this.head);
+
+    // 眼睛（精英红大眼，远程蓝眼）
+    const eyeGeo = new THREE.SphereGeometry(0.035 * s * (kind === 'elite' ? 1.6 : 1), 6, 5);
+    const eyeColor = kind === 'ranged' ? 0x55aaff : kind === 'psychic' ? 0xcc88ff : 0xff3322;
+    const eyeMat = new THREE.MeshBasicMaterial({ color: eyeColor });
+    const eL = new THREE.Mesh(eyeGeo, eyeMat);
+    eL.position.set(-0.07 * s, 1.75 * s, 0.18 * s);
+    const eR = eL.clone();
+    eR.position.x = 0.07 * s;
+    this.mesh.add(eL, eR);
+
+    const armGeo = new THREE.BoxGeometry(0.13 * s, 0.13 * s, 0.62 * s);
+    const armL = new THREE.Mesh(armGeo, this.bodyMat);
+    armL.position.set(-0.24 * s, 1.25 * s, 0.35 * s);
+    const armR = armL.clone();
+    armR.position.x = 0.24 * s;
+    this.mesh.add(armL, armR);
+
+    const legGeo = new THREE.BoxGeometry(0.2 * s, 0.45 * s, 0.22 * s);
+    const legL = new THREE.Mesh(legGeo, this.bodyMat);
+    legL.position.set(-0.16 * s, 0.22 * s, 0);
+    const legR = legL.clone();
+    legR.position.x = 0.16 * s;
+    this.mesh.add(legL, legR);
+
+    // 重甲：肩甲
+    if (kind === 'heavy' || kind === 'elite') {
+      const plateMat = new THREE.MeshStandardMaterial({ color: 0x55555f, metalness: 0.7, roughness: 0.4 });
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(0.8 * s, 0.18 * s, 0.5 * s), plateMat);
+      plate.position.y = 1.52 * s;
+      this.mesh.add(plate);
+    }
+
+    this.mesh.position.copy(pos);
+    scene.add(this.mesh);
+  }
+
+  update(dt        , time        , playerPos               , audio         )         {
+    if (this.dead) {
+      this.deathTimer += dt;
+      this.mesh.rotation.x = Math.min(Math.PI / 2, this.deathTimer * 4);
+      if (this.deathTimer > 1.1) this.removed = true;
+      return 0;
+    }
+
+    const to = new THREE.Vector3().subVectors(playerPos, this.mesh.position);
+    to.y = 0;
+    const dist = to.length();
+    to.normalize();
+
+    if (this.conf.ranged) {
+      // 远程：保持5~9米距离射击
+      if (dist > 9) {
+        this.mesh.position.addScaledVector(to, this.speed * dt);
+      } else if (dist < 5) {
+        this.mesh.position.addScaledVector(to, -this.speed * 0.6 * dt);
+      }
+      this.mesh.rotation.y = Math.atan2(to.x, to.z);
+      this.shootTimer -= dt;
+      if (this.shootTimer <= 0 && dist < 14) {
+        this.shootTimer = 2.6 + Math.random() * 0.8;
+        if (this.onShoot) {
+          this.onShoot(this.mesh.position.clone().setY(this.mesh.position.y + 1.5));
+        }
+      }
+    } else if (dist > 1.1 * this.conf.scale) {
+      this.mesh.position.addScaledVector(to, this.speed * dt);
+      this.mesh.rotation.y = Math.atan2(to.x, to.z);
+      this.mesh.rotation.z = Math.sin(time * 4 + this.bobPhase) * 0.08;
+      this.mesh.position.y = Math.abs(Math.sin(time * 5 + this.bobPhase)) * 0.05;
+    }
+
+    if (this.flashTimer > 0) {
+      this.flashTimer -= dt;
+      if (this.flashTimer <= 0) this.bodyMat.emissive.setHex(0x000000);
+    }
+
+    // 近战
+    this.attackTimer -= dt;
+    if (!this.conf.ranged && dist < 1.4 * this.conf.scale && this.attackTimer <= 0) {
+      this.attackTimer = 1.4;
+      audio.meleeHit();
+      return this.conf.psychic ? 2 : 1;
+    }
+    return 0;
+  }
+
+  takeDamage(amount        , part        )                                                      {
+    if (this.dead) return { dmg: 0, killed: false, headshot: false };
+    const headshot = part === 'head';
+    const dmg = Math.max(1, Math.round(headshot ? amount * 3 : amount * this.conf.bodyArmor));
+    this.hp -= dmg;
+    this.bodyMat.emissive.setHex(0x661111);
+    this.flashTimer = 0.07;
+    if (this.hp <= 0) {
+      this.dead = true;
+      return { dmg, killed: true, headshot };
+    }
+    return { dmg, killed: false, headshot };
+  }
+
+  dispose(scene             )       {
+    scene.remove(this.mesh);
+    this.mesh.traverse((o                ) => {
+      const m = o              ;
+      if (m.geometry) m.geometry.dispose();
+    });
+  }
+}
+
+class ZombieManager {
+  zombies           = [];
+          scene             ;
+  onRangedShoot                                           = null;
+
+  constructor(scene             ) {
+    this.scene = scene;
+  }
+
+  // 按深度抽敌人构成
+  composition(depth        , count        )               {
+    const out               = [];
+    for (let i = 0; i < count; i++) {
+      const r = Math.random();
+      if (depth >= 8 && r < 0.12) out.push('psychic');
+      else if (depth >= 6 && r < 0.26) out.push('heavy');
+      else if (depth >= 5 && r < 0.42) out.push('ranged');
+      else if (depth >= 3 && r < 0.65) out.push('fast');
+      else out.push('normal');
+    }
+    return out;
+  }
+
+  spawn(pos               , depth        , kind            )         {
+    const z = new Zombie(this.scene, pos, depth, kind);
+    z.onShoot = (origin               ) => {
+      if (this.onRangedShoot) this.onRangedShoot(origin);
+    };
+    this.zombies.push(z);
+    return z;
+  }
+
+  spawnWave(zFrom        , zTo        , width        , depth        , kinds              )       {
+    for (const kind of kinds) {
+      const x = (Math.random() - 0.5) * (width - 2.5);
+      const z = zTo + Math.random() * (zFrom - zTo) * 0.55;
+      this.spawn(new THREE.Vector3(x, 0, z), depth, kind);
+    }
+  }
+
+  get aliveCount()         {
+    return this.zombies.filter((z) => !z.dead).length;
+  }
+
+  // 返回 {hpHits, sanityHits}
+  update(dt        , time        , playerPos               , audio         )                                         {
+    let hpHits = 0, sanityHits = 0;
+    for (const z of this.zombies) {
+      const r = z.update(dt, time, playerPos, audio);
+      if (r === 1) hpHits++;
+      else if (r === 2) sanityHits++;
+    }
+    const gone = this.zombies.filter((z) => z.removed);
+    for (const z of gone) z.dispose(this.scene);
+    this.zombies = this.zombies.filter((z) => !z.removed);
+    return { hpHits, sanityHits };
+  }
+
+  targets()                   {
+    const out                   = [];
+    for (const z of this.zombies) {
+      if (z.dead) continue;
+      out.push(z.head, z.body);
+    }
+    return out;
+  }
+}
+
+
+// ===== player.ts =====
+
+// 玩家载具：越肩相机 + 手电 + 枪械（自动前进，策划案"通用规则"）
+class PlayerRig {
+  position                = new THREE.Vector3(0, 0, 2);
+  hp         = 100;
+  maxHp         = 100;
+  sanity         = 60;
+  maxSanity         = 60;
+  coins         = 0;       // 本局战利品
+  damageMult         = 1;  // 强化弹药加成
+  alive          = true;
+
+  // 枪械
+           magSize         = 12;
+  ammo         = 12;
+  reloading         = 0;   // >0 换弹中（剩余秒）
+           reloadTime         = 1.15;
+          fireCooldown         = 0;
+           fireInterval         = 0.22;
+  baseDamage         = 8;
+
+  camera                         ;
+          gun             ;
+          muzzleFlash                  ;
+          flashlight                 ;
+          recoil         = 0;
+  walkSpeed         = 3.2;
+
+  constructor(scene             , camera                         ) {
+    this.camera = camera;
+
+    // 手电筒（核心微恐光源）
+    this.flashlight = new THREE.SpotLight(0xfff2d9, 28, 26, 0.42, 0.45, 1.4);
+    scene.add(this.flashlight);
+    scene.add(this.flashlight.target);
+
+    // 枪模型挂相机（屏幕右下）
+    this.gun = new THREE.Group();
+    const gunMat = new THREE.MeshStandardMaterial({ color: 0x2c2c33, metalness: 0.7, roughness: 0.35 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.11, 0.34), gunMat);
+    this.gun.add(body);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.2, 8), gunMat);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, 0.035, -0.25);
+    this.gun.add(barrel);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.14, 0.07), gunMat);
+    grip.position.set(0, -0.1, 0.1);
+    grip.rotation.x = 0.3;
+    this.gun.add(grip);
+    // 持枪的手
+    const hand = new THREE.Mesh(
+      new THREE.SphereGeometry(0.05, 8, 6),
+      new THREE.MeshStandardMaterial({ color: 0xe8bd9a })
+    );
+    hand.position.set(0, -0.09, 0.08);
+    this.gun.add(hand);
+    camera.add(this.gun);
+    this.gun.position.set(0.22, -0.18, -0.55);
+    scene.add(camera);
+
+    this.muzzleFlash = new THREE.PointLight(0xffcc66, 0, 4, 2);
+    this.muzzleFlash.position.set(0.22, -0.12, -0.85);
+    camera.add(this.muzzleFlash);
+  }
+
+  // 是否可开火
+  canFire()          {
+    return this.alive && this.reloading <= 0 && this.fireCooldown <= 0 && this.ammo > 0;
+  }
+
+  fire(audio         )          {
+    if (this.reloading > 0 || this.fireCooldown > 0) return false;
+    if (this.ammo <= 0) {
+      audio.dryFire();
+      this.startReload(audio);
+      return false;
+    }
+    this.ammo -= 1;
+    this.fireCooldown = this.fireInterval;
+    this.recoil = 1;
+    this.muzzleFlash.intensity = 8;
+    audio.gunshot();
+    if (this.ammo <= 0) this.startReload(audio);
+    return true;
+  }
+
+  startReload(audio         )       {
+    if (this.reloading > 0 || this.ammo >= this.magSize) return;
+    this.reloading = this.reloadTime;
+    audio.reloadStart();
+  }
+
+  takeDamage(amount        )       {
+    if (!this.alive) return;
+    this.hp -= amount;
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.alive = false;
+    }
+  }
+
+  heal(v        )       {
+    this.hp = Math.min(this.maxHp, this.hp + v);
+  }
+  addSanity(v        )       {
+    this.sanity = Math.min(this.maxSanity, this.sanity + v);
+  }
+
+  update(dt        , moving         , mouseNDC               , audio         , time        )       {
+    if (moving && this.alive) {
+      this.position.z -= this.walkSpeed * dt;
+    }
+
+    if (this.reloading > 0) {
+      this.reloading -= dt;
+      if (this.reloading <= 0) {
+        this.ammo = this.magSize;
+        audio.reloadEnd();
+      }
+    }
+    if (this.fireCooldown > 0) this.fireCooldown -= dt;
+    this.recoil = Math.max(0, this.recoil - dt * 7);
+    this.muzzleFlash.intensity = Math.max(0, this.muzzleFlash.intensity - dt * 60);
+
+    // 越肩相机：右肩后上方，鼠标提供视差转动
+    const yawOff = mouseNDC.x * 0.34;
+    const pitchOff = mouseNDC.y * 0.22;
+    const camPos = new THREE.Vector3(
+      this.position.x + 0.55 + Math.sin(yawOff) * 0.3,
+      this.position.y + 1.72 + (moving ? Math.sin(time * 8) * 0.025 : 0),
+      this.position.z + 2.1
+    );
+    this.camera.position.lerp(camPos, 0.25);
+    const lookAt = new THREE.Vector3(
+      this.position.x + Math.sin(yawOff) * 14,
+      this.position.y + 1.55 + Math.sin(pitchOff) * 9 + this.recoil * 0.5,
+      this.position.z - 14
+    );
+    this.camera.lookAt(lookAt);
+
+    // 枪口微动 + 换弹下沉
+    const reloadDip = this.reloading > 0 ? 0.16 : 0;
+    this.gun.position.set(
+      0.22,
+      -0.18 - reloadDip + Math.sin(time * 7.7) * 0.004 + this.recoil * 0.03,
+      -0.55 + this.recoil * 0.07
+    );
+    this.gun.rotation.x = this.recoil * 0.22 - reloadDip * 1.6;
+
+    // 手电跟随准星
+    this.flashlight.position.copy(this.camera.position);
+    this.flashlight.target.position.copy(lookAt);
+  }
+}
+
+
+// ===== hud.ts =====
+
+                   
+                  
+                          
+              
+               
+ 
+
+class HUD {
+          hpFill             ;
+          hpText             ;
+          sanFill             ;
+          sanText             ;
+          ammoText             ;
+          reloadHint             ;
+          coinsText             ;
+          depthText             ;
+          stateText             ;
+          crosshair             ;
+          hitmarker             ;
+          toastEl             ;
+          promptEl             ;
+          vignette             ;
+          floaterLayer             ;
+          searchPanel             ;
+          searchFill             ;
+          searchLabel             ;
+          skipBtn             ;
+          choiceOverlay             ;
+          choiceCards             ;
+          extractOverlay             ;
+          endOverlay             ;
+          endTitle             ;
+          endStats             ;
+          bagSlots             ;
+          bagValue             ;
+          conSlots             ;
+          bagfullOverlay             ;
+          intelOverlay             ;
+          intelText             ;
+
+          toastTimer         = 0;
+          hitTimer         = 0;
+          floaters            = [];
+          lastBagSig         = '';
+
+  onSkipSearch                      = null;
+  onChoice                                 = null;
+  onExtract                                    = null;
+  onBagDecision                                      = null;
+  onIntelContinue                      = null;
+
+  constructor() {
+    const $ = (id        )              => document.getElementById(id) ;
+    this.hpFill = $('hp-fill'); this.hpText = $('hp-text');
+    this.sanFill = $('san-fill'); this.sanText = $('san-text');
+    this.ammoText = $('ammo-text'); this.reloadHint = $('reload-hint');
+    this.coinsText = $('coins-text'); this.depthText = $('depth-text');
+    this.stateText = $('state-text');
+    this.crosshair = $('crosshair'); this.hitmarker = $('hitmarker');
+    this.toastEl = $('toast'); this.promptEl = $('prompt');
+    this.vignette = $('vignette');
+    this.floaterLayer = $('floater-layer');
+    this.searchPanel = $('search-panel');
+    this.searchFill = $('search-fill');
+    this.searchLabel = $('search-label');
+    this.skipBtn = $('skip-btn');
+    this.choiceOverlay = $('choice-overlay');
+    this.choiceCards = $('choice-cards');
+    this.extractOverlay = $('extract-overlay');
+    this.endOverlay = $('end-overlay');
+    this.endTitle = $('end-title');
+    this.endStats = $('end-stats');
+    this.bagSlots = $('bag-slots');
+    this.bagValue = $('bag-value');
+    this.conSlots = $('con-slots');
+    this.bagfullOverlay = $('bagfull-overlay');
+    this.intelOverlay = $('intel-overlay');
+    this.intelText = $('intel-text');
+
+    this.skipBtn.addEventListener('click', () => {
+      if (this.onSkipSearch) this.onSkipSearch();
+    });
+    $('extract-yes').addEventListener('click', () => {
+      this.extractOverlay.style.display = 'none';
+      if (this.onExtract) this.onExtract(true);
+    });
+    $('extract-no').addEventListener('click', () => {
+      this.extractOverlay.style.display = 'none';
+      if (this.onExtract) this.onExtract(false);
+    });
+    $('bagfull-replace').addEventListener('click', () => {
+      this.bagfullOverlay.style.display = 'none';
+      if (this.onBagDecision) this.onBagDecision(true);
+    });
+    $('bagfull-discard').addEventListener('click', () => {
+      this.bagfullOverlay.style.display = 'none';
+      if (this.onBagDecision) this.onBagDecision(false);
+    });
+    $('intel-continue').addEventListener('click', () => {
+      this.intelOverlay.style.display = 'none';
+      if (this.onIntelContinue) this.onIntelContinue();
+    });
+    $('restart-btn').addEventListener('click', () => location.reload());
+  }
+
+  update(
+    dt        , hp        , maxHp        , sanity        , maxSanity        ,
+    ammo        , magSize        , reloading        , reloadTime        ,
+    bagValue        , depth        , stateLabel        , mousePx                          
+  )       {
+    this.hpFill.style.width = `${Math.max(0, (hp / maxHp) * 100)}%`;
+    this.hpText.textContent = `${Math.ceil(hp)}`;
+    this.sanFill.style.width = `${Math.max(0, (sanity / maxSanity) * 100)}%`;
+    this.sanText.textContent = `${Math.ceil(sanity)}`;
+    this.ammoText.textContent = reloading > 0 ? '装填中' : `${ammo} / ${magSize}`;
+    this.reloadHint.style.opacity = reloading > 0 ? '1' : '0';
+    if (reloading > 0) {
+      const p = 1 - reloading / reloadTime;
+      this.reloadHint.textContent = `🔄 ${(p * 100).toFixed(0)}%`;
+    }
+    this.coinsText.textContent = `💰 ${bagValue}`;
+    this.depthText.textContent = `深度 ${depth}`;
+    this.stateText.textContent = stateLabel;
+
+    this.crosshair.style.transform = `translate(${mousePx.x}px, ${mousePx.y}px)`;
+
+    if (this.hitTimer > 0) {
+      this.hitTimer -= dt;
+      this.hitmarker.style.transform = `translate(${mousePx.x}px, ${mousePx.y}px)`;
+      if (this.hitTimer <= 0) this.hitmarker.style.opacity = '0';
+    }
+    if (this.toastTimer > 0) {
+      this.toastTimer -= dt;
+      if (this.toastTimer <= 0) this.toastEl.style.opacity = '0';
+    }
+
+    const danger = Math.max(1 - hp / maxHp, 1 - sanity / maxSanity);
+    this.vignette.style.opacity = `${Math.min(0.85, danger * 0.9)}`;
+  }
+
+  // ===== 背包UI =====
+  updateBackpack(bag          )       {
+    const sig =
+      bag.items.map((i) => i.name + i.value).join(',') + '|' +
+      bag.consumables.med + bag.consumables.sedative + bag.consumables.grenade;
+    if (sig === this.lastBagSig) return;
+    this.lastBagSig = sig;
+
+    this.bagSlots.innerHTML = '';
+    for (let i = 0; i < bag.cap; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'bag-slot';
+      const item = bag.items[i];
+      if (item) {
+        slot.style.borderColor = RARITY_INFO[item.rarity].color;
+        slot.innerHTML = `<span class="b-icon">${item.icon}</span><span class="b-val">${item.value}</span>`;
+        slot.title = `${item.name}（${RARITY_INFO[item.rarity].name}）价值${item.value}`;
+      }
+      this.bagSlots.appendChild(slot);
+    }
+    this.bagValue.textContent = `总价值 ${bag.totalValue}`;
+
+    this.conSlots.innerHTML = '';
+    const kinds                   = ['med', 'sedative', 'grenade'];
+    for (const k of kinds) {
+      const info = CONSUMABLE_INFO[k];
+      const n = bag.consumables[k];
+      const slot = document.createElement('div');
+      slot.className = 'con-slot' + (n <= 0 ? ' empty' : '');
+      slot.innerHTML =
+        `<span class="c-key">${info.key}</span><span class="c-icon">${info.icon}</span><span class="c-n">×${n}</span>`;
+      slot.title = `${info.name}：${info.desc}（按 ${info.key} 使用）`;
+      this.conSlots.appendChild(slot);
+    }
+  }
+
+  showBagFull(newItem              , lowest              )       {
+    document.getElementById('bagfull-new') .innerHTML =
+      `新拾取：${newItem.icon} <b style="color:${RARITY_INFO[newItem.rarity].color}">${newItem.name}</b>（价值 ${newItem.value}）`;
+    document.getElementById('bagfull-low') .innerHTML =
+      `背包最低：${lowest.icon} <b style="color:${RARITY_INFO[lowest.rarity].color}">${lowest.name}</b>（价值 ${lowest.value}）`;
+    this.bagfullOverlay.style.display = 'flex';
+  }
+
+  // ===== 战前情报 =====
+  showIntel(html        )       {
+    this.intelText.innerHTML = html;
+    this.intelOverlay.style.display = 'flex';
+  }
+
+  showHitmarker(headshot         )       {
+    this.hitmarker.style.opacity = '1';
+    this.hitmarker.style.color = headshot ? '#ff5c5c' : '#ffffff';
+    this.hitmarker.style.fontSize = headshot ? '30px' : '22px';
+    this.hitTimer = 0.18;
+  }
+
+  setPrompt(text               )       {
+    if (text) {
+      this.promptEl.textContent = text;
+      this.promptEl.style.opacity = '1';
+    } else {
+      this.promptEl.style.opacity = '0';
+    }
+  }
+
+  showToast(text        )       {
+    this.toastEl.textContent = text;
+    this.toastEl.style.opacity = '1';
+    this.toastTimer = 1.8;
+  }
+
+  showSearchPanel(label        )       {
+    this.searchPanel.style.display = 'flex';
+    this.searchLabel.textContent = label;
+    this.searchFill.style.width = '0%';
+  }
+  setSearchProgress(p        )       {
+    this.searchFill.style.width = `${Math.min(100, p * 100)}%`;
+  }
+  hideSearchPanel()       {
+    this.searchPanel.style.display = 'none';
+  }
+
+  showChoice(options            )       {
+    this.choiceCards.innerHTML = '';
+    for (const t of options) {
+      const info = ROOM_INFO[t];
+      const card = document.createElement('button');
+      card.className = 'door-card';
+      card.innerHTML = `<span class="door-icon">${info.icon}</span><strong>${info.name}之间</strong><em>${info.hint}</em>`;
+      card.addEventListener('click', () => {
+        this.choiceOverlay.style.display = 'none';
+        if (this.onChoice) this.onChoice(t);
+      });
+      this.choiceCards.appendChild(card);
+    }
+    this.choiceOverlay.style.display = 'flex';
+  }
+
+  showExtractDialog(value        )       {
+    document.getElementById('extract-coins') .textContent =
+      `当前背包战利品总价值：💰 ${value}`;
+    this.extractOverlay.style.display = 'flex';
+  }
+
+  showEnd(victory         , title        , lines          )       {
+    this.endTitle.textContent = title;
+    this.endTitle.style.color = victory ? '#35e07a' : '#ff5c5c';
+    this.endStats.innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
+    this.endOverlay.style.display = 'flex';
+  }
+
+  floatText(worldPos               , text        , cls        )       {
+    if (this.floaters.length > 30) return;
+    const el = document.createElement('div');
+    el.className = `floater ${cls}`;
+    el.textContent = text;
+    this.floaterLayer.appendChild(el);
+    this.floaters.push({ el, worldPos: worldPos.clone(), age: 0, life: 0.65 });
+  }
+
+  updateFloaters(dt        , camera              )       {
+    const w = window.innerWidth, h = window.innerHeight;
+    const v = new THREE.Vector3();
+    for (const f of this.floaters) {
+      f.age += dt;
+      if (f.age >= f.life) {
+        f.el.remove();
+        continue;
+      }
+      f.worldPos.y += dt * 1.2;
+      v.copy(f.worldPos).project(camera);
+      f.el.style.transform = `translate(${(v.x * 0.5 + 0.5) * w}px, ${(-v.y * 0.5 + 0.5) * h}px)`;
+      f.el.style.opacity = `${1 - f.age / f.life}`;
+    }
+    this.floaters = this.floaters.filter((f) => f.age < f.life);
+  }
+}
+
+
+// ===== game.ts =====
+
+                                                                                                      
+
+const STATE_LABEL                         = {
+  moving: '▶ 前进中…',
+  combat: '⚔ 战斗！消灭所有敌人',
+  search: '🔍 搜索中（点击箱子）',
+  choice: '🚪 选择路线',
+  extract: '🟢 撤离点',
+  intel: '📋 战前情报',
+  bagfull: '🎒 背包已满',
+  over: '',
+};
+
+const KIND_NAMES                         = {
+  normal: '食尸鬼', fast: '开膛手', ranged: '追踪者',
+  heavy: '再生者', psychic: '无形之子', elite: '巨人',
+};
+
+                     
+                   
+                          
+               
+                
+ 
+
+class Game {
+          renderer                     ;
+          scene             ;
+          camera                         ;
+          clock              = new THREE.Clock();
+          raycaster                  = new THREE.Raycaster();
+
+          input       ;
+          audio         ;
+          meta      ;
+          dungeon         ;
+          zombies               ;
+          player           ;
+          hud     ;
+          bag           = new Backpack();
+
+          state            = 'moving';
+          currentRoom              = null;
+          enteredDepth        ;
+          triggeredDepth        ;
+          pendingChoice                    = null;
+          pendingItem                      = null;
+          kills         = 0;
+          searchTarget                    = null;
+          searchProgress         = 0;
+          tracers                                      = [];
+          enemyShots              = [];
+          explosions                                      = [];
+
+  constructor(canvas                   , meta      , audio         , startDepth        ) {
+    this.meta = meta;
+    this.audio = audio;
+
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.enabled = false;
+
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x07060a);
+    this.scene.fog = new THREE.Fog(0x07060a, 8, 30);
+    this.scene.add(new THREE.AmbientLight(0x44404a, 0.35));
+
+    this.camera = new THREE.PerspectiveCamera(
+      62, window.innerWidth / window.innerHeight, 0.05, 80
+    );
+    window.addEventListener('resize', () => {
+      this.camera.aspect = window.innerWidth / window.innerHeight;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    this.input = new Input(canvas);
+    this.dungeon = new Dungeon(this.scene, startDepth);
+    this.enteredDepth = startDepth;
+    this.triggeredDepth = startDepth;
+    this.zombies = new ZombieManager(this.scene);
+    this.zombies.onRangedShoot = (origin               ) => this.spawnEnemyShot(origin);
+    this.player = new PlayerRig(this.scene, this.camera);
+    this.hud = new HUD();
+
+    this.hud.onSkipSearch = () => this.finishSearch();
+    this.hud.onChoice = (t          ) => {
+      this.pendingChoice = null;
+      this.dungeon.append(t);
+      this.audio.doorOpen();
+      this.state = 'moving';
+    };
+    this.hud.onExtract = (leave         ) => {
+      if (leave) {
+        this.endRun(true, '撤离成功');
+      } else {
+        this.hud.showToast('继续深入……更危险，也更富有');
+        this.state = 'moving';
+      }
+    };
+    this.hud.onBagDecision = (replace         ) => {
+      if (this.pendingItem) {
+        if (replace) {
+          const dropped = this.bag.replaceLowest(this.pendingItem);
+          this.hud.showToast(`换入 ${this.pendingItem.icon}${this.pendingItem.name}，丢弃 ${dropped ? dropped.name : ''}`);
+        } else {
+          this.hud.showToast(`放弃了 ${this.pendingItem.icon}${this.pendingItem.name}`);
+        }
+        this.pendingItem = null;
+      }
+      this.state = 'search';
+    };
+    this.hud.onIntelContinue = () => {
+      this.state = 'moving';
+    };
+
+    this.dungeon.append('corridor');
+    this.appendNext();
+    this.meta.data.runs += 1;
+    this.meta.save();
+    if (startDepth > 0) {
+      this.hud.showToast(`🏕️ 从安全屋出发（深度 ${startDepth}）`);
+    }
+  }
+
+  start()       {
+    this.renderer.setAnimationLoop(() => this.tick());
+  }
+
+          appendNext()       {
+    const options = this.dungeon.nextOptions();
+    if (options.length === 1) {
+      this.dungeon.append(options[0]);
+    } else {
+      this.pendingChoice = options;
+    }
+  }
+
+          roomAt(z        )              {
+    for (const r of this.dungeon.rooms) {
+      if (z <= r.zEntry && z > r.zExit) return r;
+    }
+    return null;
+  }
+
+          endRun(extracted         , title        )       {
+    this.state = 'over';
+    const v = this.bag.totalValue;
+    const depth = this.dungeon.currentDepth;
+    if (extracted) {
+      this.meta.data.bank += v;
+      this.meta.data.extracts += 1;
+      this.audio.extractOk();
+    } else {
+      this.audio.death();
+    }
+    if (depth > this.meta.data.bestDepth) this.meta.data.bestDepth = depth;
+    this.meta.save();
+    const itemList = this.bag.items.map((i) => `${i.icon}`).join(' ') || '（空）';
+    const lines = extracted
+      ? [`带出战利品：${itemList}`, `总价值：💰 ${v}`, `探索深度：${depth} ｜ 击杀：${this.kills}`, `金库总额：💰 ${this.meta.data.bank}`]
+      : [`损失战利品：${itemList}（价值 ${v}）`, `探索深度：${depth} ｜ 击杀：${this.kills}`, `金库总额：💰 ${this.meta.data.bank}`];
+    this.hud.showEnd(extracted, title, lines);
+  }
+
+  // ===== 敌方弹幕 =====
+          spawnEnemyShot(origin               )       {
+    const target = new THREE.Vector3(
+      this.player.position.x, this.player.position.y + 1.4, this.player.position.z
+    );
+    const dir = target.sub(origin).normalize();
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.16, 8, 6),
+      new THREE.MeshBasicMaterial({ color: 0x66ccff })
+    );
+    mesh.position.copy(origin);
+    this.scene.add(mesh);
+    this.enemyShots.push({ mesh, velocity: dir.multiplyScalar(9), life: 4, dead: false });
+    this.audio.searchTick();
+  }
+
+  // ===== 消耗品 =====
+          useConsumable(kind                )       {
+    if (!this.bag.useConsumable(kind)) {
+      this.hud.showToast(`${CONSUMABLE_INFO[kind].icon} 没有${CONSUMABLE_INFO[kind].name}了`);
+      return;
+    }
+    if (kind === 'med') {
+      this.player.heal(35);
+      this.hud.showToast('🩹 +35 生命');
+      this.audio.loot();
+    } else if (kind === 'sedative') {
+      this.player.addSanity(15);
+      this.hud.showToast('💊 +15 神智');
+      this.audio.loot();
+    } else {
+      this.throwGrenade();
+    }
+  }
+
+          throwGrenade()       {
+    // 手雷在准星指向处爆炸（落点取射线12米或命中点）
+    this.raycaster.setFromCamera(this.input.mouseNDC, this.camera);
+    const hits = this.raycaster.intersectObjects(this.zombies.targets(), false);
+    const point = hits.length > 0
+      ? hits[0].point.clone()
+      : this.raycaster.ray.at(10, new THREE.Vector3()).setY(0.3);
+
+    const boom = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 12, 10),
+      new THREE.MeshBasicMaterial({ color: 0xffaa44, transparent: true, opacity: 0.9 })
+    );
+    boom.position.copy(point);
+    this.scene.add(boom);
+    this.explosions.push({ mesh: boom, age: 0 });
+    this.audio.gunshot();
+    this.audio.zombieDie();
+
+    for (const z of this.zombies.zombies) {
+      if (z.dead) continue;
+      const d = z.mesh.position.distanceTo(point);
+      if (d < 4.5) {
+        const result = z.takeDamage(50, 'body');
+        this.hud.floatText(z.mesh.position.clone().setY(1.4), `${result.dmg}`, 'dmg');
+        if (result.killed) this.onKill(z);
+      }
+    }
+  }
+
+          onKill(z        )       {
+    this.audio.zombieDie();
+    this.kills += 1;
+    if (z.kind === 'elite') {
+      // 精英掉2件高品质（直接尝试入包）
+      this.hud.showToast('💀 精英已击破！掉落珍贵战利品');
+      for (let i = 0; i < 2; i++) {
+        const drop = rollSearchDrop(this.dungeon.currentDepth + 8);
+        if (drop.kind === 'treasure') this.tryAddItem(drop.item);
+      }
+    }
+  }
+
+          tryAddItem(item              )       {
+    if (this.bag.add(item)) {
+      this.hud.showToast(`${item.icon} ${item.name}（${RARITY_INFO[item.rarity].name}）价值 ${item.value}`);
+      return;
+    }
+    // 背包满：取舍对话（策划案"背包与容量管理"）
+    const low = this.bag.lowestItem();
+    if (low && item.value > low.value) {
+      this.pendingItem = item;
+      this.state = 'bagfull';
+      this.hud.showBagFull(item, low);
+    } else {
+      this.hud.showToast(`🎒 背包已满，放弃了 ${item.name}（价值低于包内物品）`);
+    }
+  }
+
+  // ===== 射击 =====
+          tryShoot()       {
+    if (!this.player.canFire()) {
+      if (this.player.ammo <= 0 && this.player.reloading <= 0) this.player.fire(this.audio);
+      return;
+    }
+    this.player.fire(this.audio);
+
+    this.raycaster.setFromCamera(this.input.mouseNDC, this.camera);
+    const hits = this.raycaster.intersectObjects(this.zombies.targets(), false);
+
+    const start = new THREE.Vector3(
+      this.camera.position.x + 0.2, this.camera.position.y - 0.1, this.camera.position.z - 0.5
+    );
+    const end = hits.length > 0
+      ? hits[0].point.clone()
+      : this.raycaster.ray.at(30, new THREE.Vector3());
+    const mid = start.clone().add(end).multiplyScalar(0.5);
+    const len = start.distanceTo(end);
+    const tracer = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.012, 0.012, len, 4),
+      new THREE.MeshBasicMaterial({ color: 0xffe9a0, transparent: true, opacity: 0.85 })
+    );
+    tracer.position.copy(mid);
+    tracer.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0), end.clone().sub(start).normalize()
+    );
+    this.scene.add(tracer);
+    this.tracers.push({ mesh: tracer, age: 0 });
+
+    if (hits.length > 0) {
+      const obj = hits[0].object;
+      const z = obj.userData.zombie          ;
+      const part = obj.userData.part          ;
+      const result = z.takeDamage(
+        Math.round(this.player.baseDamage * this.player.damageMult), part
+      );
+      this.hud.showHitmarker(result.headshot);
+      this.hud.floatText(
+        hits[0].point, `${result.dmg}`, result.headshot ? 'head' : 'dmg'
+      );
+      if (result.headshot) this.audio.headshot();
+      else this.audio.hit();
+      if (result.killed) this.onKill(z);
+    }
+  }
+
+  // ===== 搜索 =====
+          trySearchClick()       {
+    if (!this.currentRoom) return;
+    this.raycaster.setFromCamera(this.input.mouseNDC, this.camera);
+    const crates = this.currentRoom.crates.filter((c) => !c.userData.searched);
+    const hits = this.raycaster.intersectObjects(crates, false);
+    if (hits.length > 0) {
+      this.searchTarget = hits[0].object              ;
+      this.searchProgress = 0;
+      this.hud.showSearchPanel('搜索中…');
+    }
+  }
+
+          finishSearch()       {
+    this.hud.hideSearchPanel();
+    this.searchTarget = null;
+    this.state = 'moving';
+    this.hud.setPrompt(null);
+  }
+
+          applySearchDrop()       {
+    const drop = rollSearchDrop(this.dungeon.currentDepth);
+    this.audio.loot();
+    if (drop.kind === 'treasure') {
+      this.tryAddItem(drop.item);
+    } else if (drop.kind === 'consumable') {
+      const info = CONSUMABLE_INFO[drop.con];
+      if (this.bag.addConsumable(drop.con)) {
+        this.hud.showToast(`${info.icon} ${info.name} ×1（按 ${info.key} 使用）`);
+      } else {
+        this.hud.showToast(`${info.icon} ${info.name}槽已满，留在了原地`);
+      }
+    } else {
+      this.player.damageMult += 0.1;
+      this.hud.showToast('🔫 强化弹药！伤害 +10%');
+    }
+  }
+
+  // ===== 房间事件 =====
+          onEnterRoom(room      )       {
+    this.enteredDepth = room.depth;
+    const cost = 3 + Math.floor(room.depth / 5);
+    this.player.sanity -= cost;
+    this.audio.sanityHit();
+    this.hud.floatText(
+      new THREE.Vector3(this.player.position.x, 2.6, this.player.position.z - 2),
+      `神智 -${cost}`, 'sanity'
+    );
+    if (this.player.sanity <= 0) {
+      this.player.sanity = 0;
+      this.endRun(true, '神智崩溃 — 强制撤离');
+      return;
+    }
+    // 战前情报（策划案"战前筹备"：精英房进入前预警）
+    if (room.type === 'elite') {
+      this.state = 'intel';
+      this.hud.showIntel(
+        `<b style="color:#ff5c5c">⚠ 前方探测到强大的生命反应</b><br><br>` +
+        `敌情：<b>巨人</b> ×1，护甲厚重（身体受击减伤，瞄准头部！）<br>` +
+        `随从：若干食尸鬼<br><br>` +
+        `建议：检查弹药，备好手雷（按3使用）`
+      );
+    }
+    if (!this.pendingChoice && room.depth >= this.dungeon.currentDepth) {
+      this.appendNext();
+    }
+  }
+
+          onRoomCenter(room      )       {
+    this.triggeredDepth = room.depth;
+    const w = room.type === 'corridor' ? 5 : 11;
+    if (room.type === 'combat') {
+      const count = 3 + Math.floor(room.depth / 3) + Math.floor(Math.random() * 2);
+      const kinds = this.zombies.composition(room.depth, count);
+      this.zombies.spawnWave(room.zCenter, room.zExit + 1.5, w, room.depth, kinds);
+      // 敌情速报
+      const summary                         = {};
+      for (const k of kinds) summary[k] = (summary[k] || 0) + 1;
+      const txt = Object.keys(summary).map((k) => `${KIND_NAMES[k]}×${summary[k]}`).join(' ');
+      this.hud.showToast(`⚔ 遭遇：${txt}`);
+      this.audio.zombieGroan(0.1);
+      this.state = 'combat';
+    } else if (room.type === 'elite') {
+      this.zombies.spawnWave(room.zCenter, room.zExit + 1.5, w, room.depth, ['elite', 'normal', 'normal']);
+      this.audio.zombieGroan(0.13);
+      this.state = 'combat';
+    } else if (room.type === 'corridor') {
+      if (Math.random() < 0.35) {
+        this.zombies.spawnWave(
+          room.zCenter, room.zExit + 1, w, room.depth,
+          this.zombies.composition(room.depth, 1 + Math.floor(Math.random() * 2))
+        );
+        this.audio.zombieGroan(0.09);
+        this.state = 'combat';
+      }
+    } else if (room.type === 'treasure') {
+      this.state = 'search';
+      this.hud.setPrompt('点击箱子搜索战利品，或点"继续前进"');
+      this.hud.showSearchPanel('点击箱子开始搜索');
+      this.hud.setSearchProgress(0);
+    } else if (room.type === 'altar') {
+      const r = Math.random();
+      if (r < 0.4) {
+        this.player.damageMult += 0.15;
+        this.hud.showToast('🔮 祭坛赐福：伤害 +15%');
+      } else if (r < 0.7) {
+        this.player.heal(40);
+        this.hud.showToast('🔮 祭坛赐福：生命 +40');
+      } else {
+        this.player.addSanity(18);
+        this.hud.showToast('🔮 祭坛赐福：神智 +18');
+      }
+      this.audio.altar();
+    } else if (room.type === 'safehouse') {
+      // 安全屋：休整 + 检查点（策划案"安全屋"）
+      this.player.heal(25);
+      this.player.addSanity(10);
+      this.meta.data.checkpoint = room.depth;
+      this.meta.save();
+      this.hud.showToast(`🏕️ 安全屋：休整完毕，检查点已记录（深度 ${room.depth}）`);
+      this.audio.altar();
+    } else if (room.type === 'extract') {
+      this.state = 'extract';
+      this.hud.showExtractDialog(this.bag.totalValue);
+    }
+  }
+
+          tick()       {
+    const dt = Math.min(this.clock.getDelta(), 0.05);
+    const time = this.clock.elapsedTime;
+
+    this.audio.updateAmbient(dt, this.player.sanity / this.player.maxSanity);
+    this.dungeon.flicker(time);
+
+    // 特效衰减
+    for (const t of this.tracers) {
+      t.age += dt;
+      (t.mesh.material                           ).opacity = Math.max(0, 0.85 * (1 - t.age / 0.09));
+    }
+    const oldT = this.tracers.filter((t) => t.age > 0.09);
+    for (const t of oldT) {
+      this.scene.remove(t.mesh);
+      (t.mesh.material                  ).dispose();
+      t.mesh.geometry.dispose();
+    }
+    this.tracers = this.tracers.filter((t) => t.age <= 0.09);
+
+    for (const ex of this.explosions) {
+      ex.age += dt;
+      const t2 = ex.age / 0.45;
+      ex.mesh.scale.setScalar(0.5 + t2 * 4);
+      (ex.mesh.material                           ).opacity = Math.max(0, 0.9 * (1 - t2));
+    }
+    const oldEx = this.explosions.filter((e) => e.age > 0.45);
+    for (const e of oldEx) {
+      this.scene.remove(e.mesh);
+      (e.mesh.material                  ).dispose();
+      e.mesh.geometry.dispose();
+    }
+    this.explosions = this.explosions.filter((e) => e.age <= 0.45);
+
+    if (this.state !== 'over') {
+      if (this.input.wasPressed('KeyR')) this.player.startReload(this.audio);
+      if (this.input.wasPressed('Digit1')) this.useConsumable('med');
+      if (this.input.wasPressed('Digit2')) this.useConsumable('sedative');
+      if (this.input.wasPressed('Digit3')) this.useConsumable('grenade');
+
+      const blocked = this.state === 'intel' || this.state === 'bagfull' || this.state === 'choice' || this.state === 'extract';
+      const moving = this.state === 'moving';
+      this.player.update(dt, moving, this.input.mouseNDC, this.audio, time);
+
+      const room = this.roomAt(this.player.position.z);
+      if (room) {
+        this.currentRoom = room;
+        if (room.depth > this.enteredDepth) this.onEnterRoom(room);
+        if (
+          this.state === 'moving' &&
+          room.depth > this.triggeredDepth &&
+          this.player.position.z <= room.zCenter
+        ) {
+          this.onRoomCenter(room);
+        }
+        if (
+          this.state === 'moving' && this.pendingChoice &&
+          room.depth >= this.dungeon.currentDepth &&
+          this.player.position.z <= room.zExit + 1.6
+        ) {
+          this.state = 'choice';
+          this.hud.showChoice(this.pendingChoice);
+        }
+      }
+
+      // 敌人
+      if (!blocked && (this.state === 'combat' || this.zombies.zombies.length > 0)) {
+        const hits = this.zombies.update(dt, time, this.player.position, this.audio);
+        for (let i = 0; i < hits.hpHits; i++) {
+          this.player.takeDamage(8 + Math.floor(this.dungeon.currentDepth / 4));
+        }
+        for (let i = 0; i < hits.sanityHits; i++) {
+          this.player.sanity = Math.max(0, this.player.sanity - 6);
+          this.audio.sanityHit();
+          this.hud.floatText(
+            new THREE.Vector3(this.player.position.x, 2.4, this.player.position.z - 1),
+            '神智 -6', 'sanity'
+          );
+          if (this.player.sanity <= 0) {
+            this.endRun(true, '神智崩溃 — 强制撤离');
+          }
+        }
+        if (this.state === 'combat' && this.zombies.aliveCount === 0 && this.zombies.zombies.length === 0) {
+          this.state = 'moving';
+          if (this.currentRoom) this.currentRoom.cleared = true;
+          this.hud.showToast('✅ 区域安全，继续前进');
+        }
+      }
+
+      // 敌方弹幕
+      for (const s of this.enemyShots) {
+        s.life -= dt;
+        if (s.life <= 0) s.dead = true;
+        s.mesh.position.addScaledVector(s.velocity, dt);
+        const d = s.mesh.position.distanceTo(
+          new THREE.Vector3(this.player.position.x, this.player.position.y + 1.4, this.player.position.z)
+        );
+        if (d < 0.6) {
+          s.dead = true;
+          this.player.takeDamage(7 + Math.floor(this.dungeon.currentDepth / 5));
+          this.audio.hit();
+        }
+      }
+      const deadS = this.enemyShots.filter((s) => s.dead);
+      for (const s of deadS) {
+        this.scene.remove(s.mesh);
+        (s.mesh.material                  ).dispose();
+        s.mesh.geometry.dispose();
+      }
+      this.enemyShots = this.enemyShots.filter((s) => !s.dead);
+
+      // 射击
+      if ((this.state === 'combat' || this.state === 'moving') && this.input.isFiring()) {
+        this.tryShoot();
+      }
+
+      // 搜索
+      if (this.state === 'search') {
+        if (this.input.consumeClick() && !this.searchTarget) {
+          this.trySearchClick();
+        }
+        if (this.searchTarget) {
+          this.searchProgress += dt / 1.3;
+          this.hud.setSearchProgress(this.searchProgress);
+          if (Math.floor(this.searchProgress * 10) !== Math.floor((this.searchProgress - dt / 1.3) * 10)) {
+            this.audio.searchTick();
+          }
+          if (this.searchProgress >= 1) {
+            this.searchTarget.userData.searched = true;
+            (this.searchTarget.material                              ).color.setHex(0x3a3a3a);
+            if (this.currentRoom) this.currentRoom.searched += 1;
+            this.applySearchDrop();
+            this.searchTarget = null;
+            if (this.state === 'search') {
+              this.hud.showSearchPanel('点击下一个箱子，或继续前进');
+              this.hud.setSearchProgress(0);
+              if (this.currentRoom && this.currentRoom.searched >= this.currentRoom.crates.length) {
+                this.finishSearch();
+                this.hud.showToast('箱子已搜空，继续前进');
+              }
+            } else {
+              this.hud.hideSearchPanel();
+            }
+          }
+        }
+      }
+
+      if (!this.player.alive && this.state !== 'over') {
+        this.endRun(false, 'YOU DIED — 战利品全部丢失');
+      }
+    }
+
+    this.input.endFrame();
+
+    this.hud.update(
+      dt, this.player.hp, this.player.maxHp,
+      this.player.sanity, this.player.maxSanity,
+      this.player.ammo, this.player.magSize, this.player.reloading, this.player.reloadTime,
+      this.bag.totalValue, this.dungeon.currentDepth,
+      STATE_LABEL[this.state], this.input.mousePx
+    );
+    this.hud.updateBackpack(this.bag);
+    this.hud.updateFloaters(dt, this.camera);
+
+    this.renderer.render(this.scene, this.camera);
+  }
+}
+
+
+// ===== main.ts =====
+
+const meta = new Meta();
+const audio = new AudioFX();
+
+document.getElementById('bank-text') .textContent =
+  `💰 金库 ${meta.data.bank} ｜ 最深 ${meta.data.bestDepth} ｜ 撤离 ${meta.data.extracts}/${meta.data.runs}`;
+
+function startGame(startDepth        )       {
+  audio.init();
+  audio.startAmbient();
+  document.getElementById('start-overlay') .style.display = 'none';
+  const canvas = document.getElementById('game-canvas')                     ;
+  const game = new Game(canvas, meta, audio, startDepth);
+  game.start();
+}
+
+document.getElementById('start-btn') .addEventListener('click', () => startGame(0));
+
+// 安全屋检查点出发（策划案"安全屋"：再次探索可从已解锁安全屋开始）
+const cpBtn = document.getElementById('checkpoint-btn') ;
+if (meta.data.checkpoint > 0) {
+  cpBtn.style.display = 'inline-block';
+  cpBtn.textContent = `🏕️ 从安全屋出发（深度 ${meta.data.checkpoint}）`;
+  cpBtn.addEventListener('click', () => startGame(meta.data.checkpoint));
+}
+
+</script>
+</body>
+</html>
