@@ -8,6 +8,10 @@ export class PlayerRig {
   position: THREE.Vector3 = new THREE.Vector3(0, 0, 2);
   hp: number = 100;
   maxHp: number = 100;
+  readonly shieldUnit: number = 35;
+  shieldSlots: number = 2;
+  shield: number = 70;
+  maxShield: number = 70;
   sanity: number = 60;
   maxSanity: number = 60;
   coins: number = 0;       // 本局战利品
@@ -167,6 +171,43 @@ export class PlayerRig {
     return this.faceYaw;
   }
 
+  teleportTo(pos: THREE.Vector3): void {
+    this.position.copy(pos);
+    this.aiming = false;
+    this.aimTarget = null;
+    this.faceYaw = 0;
+    this.facePitch = 0;
+    this.aimBaseYaw = 0;
+    this.aimBasePitch = 0;
+    this.aimAnchor.set(0, 0);
+    this.aimJustEntered = false;
+    this.recoil = 0;
+    this.muzzleFlash.intensity = 0;
+
+    this.rig.position.copy(this.position);
+    this.rig.rotation.y = this.faceYaw;
+    this.upperBody.rotation.x = this.facePitch;
+    this.rig.updateMatrixWorld(true);
+    this.gun.getWorldPosition(this.muzzlePos);
+
+    const camPos = new THREE.Vector3(
+      this.position.x + 0.9,
+      this.position.y + 2.85,
+      this.position.z + 4.4
+    );
+    const lookAt = new THREE.Vector3(
+      this.position.x + 0.9,
+      this.position.y + 2.35,
+      this.position.z - 10
+    );
+    this.camera.position.copy(camPos);
+    this.camera.lookAt(lookAt);
+    this.camera.fov = this.hipFov;
+    this.camera.updateProjectionMatrix();
+    this.flashlight.position.copy(camPos);
+    this.flashlight.target.position.copy(lookAt);
+  }
+
   // 进入瞄准：准星(屏幕中心)立即对准点击方向(baseYaw/basePitch)，并以光标NDC为基准做相对偏移
   enterAim(baseYaw: number, basePitch: number, anchorNDC: THREE.Vector2): void {
     this.aimBaseYaw = baseYaw;
@@ -219,8 +260,12 @@ export class PlayerRig {
     this.fireCooldown = this.weapon.fireInterval;
     this.recoil = this.weapon.pellets > 1 ? 1.6 : 1;
     this.muzzleFlash.intensity = 8;
-    audio.gunshot();
-    if (this.weapon.pellets > 1) audio.gunshot();
+    if (this.weapon.ammoType === 'pistol') {
+      audio.pistolShot();
+    } else {
+      audio.gunshot();
+      if (this.weapon.pellets > 1) audio.gunshot();
+    }
     if (this.ammo <= 0) this.startReload(audio);
     return true;
   }
@@ -229,7 +274,7 @@ export class PlayerRig {
     if (this.reloading > 0 || this.ammo >= this.magSize) return;
     if (this.reserveCache <= 0) return;   // 没有备用子弹则无法换弹
     this.reloading = this.reloadTime;
-    audio.reloadStart();
+    audio.reloadStart(this.reloadTime);
   }
 
   // 是否还有备用子弹（供 UI/提示判断）
@@ -237,13 +282,73 @@ export class PlayerRig {
     return this.reserveCache > 0;
   }
 
+  takeMonsterDamage(amount: number): { hpLost: number; shieldLost: number } {
+    if (!this.alive) return { hpLost: 0, shieldLost: 0 };
+    const hpBefore = this.hp;
+    const shieldBefore = this.shieldCount;
+    let dmg = amount * this.dmgTakenMult;
+    if (this.shield > 0) {
+      const unitsNeeded = Math.max(1, Math.ceil(dmg / this.shieldUnit));
+      const blocked = Math.min(this.shield, unitsNeeded * this.shieldUnit);
+      this.shield -= blocked;
+      dmg = Math.max(0, dmg - blocked);
+    }
+    if (dmg > 0) {
+      this.hp -= dmg;
+      if (this.hp <= 0) {
+        this.hp = 0;
+        this.alive = false;
+      }
+    }
+    return {
+      hpLost: Math.max(0, Math.ceil(hpBefore - this.hp)),
+      shieldLost: Math.max(0, shieldBefore - this.shieldCount),
+    };
+  }
+
   takeDamage(amount: number): void {
-    if (!this.alive) return;
-    this.hp -= amount * this.dmgTakenMult;
+    this.takeMonsterDamage(amount);
+  }
+
+  spendHp(amount: number, lethal: boolean = false): number {
+    if (!this.alive) return 0;
+    const before = this.hp;
+    this.hp = lethal
+      ? Math.max(0, this.hp - amount)
+      : Math.max(1, this.hp - amount);
     if (this.hp <= 0) {
       this.hp = 0;
       this.alive = false;
     }
+    return Math.max(0, Math.ceil(before - this.hp));
+  }
+
+  configureShieldSlots(slots: number, fill: boolean = false): void {
+    this.shieldSlots = Math.max(0, Math.floor(slots));
+    this.maxShield = this.shieldSlots * this.shieldUnit;
+    this.shield = fill ? this.maxShield : Math.min(this.shield, this.maxShield);
+  }
+
+  get shieldCount(): number {
+    return this.shield <= 0 ? 0 : Math.ceil(this.shield / this.shieldUnit);
+  }
+
+  get maxShieldCount(): number {
+    return this.shieldSlots;
+  }
+
+  addShield(amount: number, temporaryCap: number = 0): number {
+    if (!this.alive) return 0;
+    if (temporaryCap > this.maxShield) {
+      this.configureShieldSlots(Math.ceil(temporaryCap / this.shieldUnit), false);
+    }
+    const before = this.shield;
+    this.shield = Math.min(this.maxShield, this.shield + amount);
+    return this.shield - before;
+  }
+
+  addShieldUnits(units: number): number {
+    return this.addShield(units * this.shieldUnit, this.maxShield);
   }
 
   heal(v: number): void {

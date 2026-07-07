@@ -16,10 +16,23 @@
     border-left: 1px solid rgba(200,162,60,.25);
     border-right: 1px solid rgba(200,162,60,.25);
   }
+  #stage.route-map-open { cursor: auto; }
   #game-canvas { display: block; width: 100%; height: 100%; }
   #hud {
     position: absolute; inset: 0; pointer-events: none;
     font-family: 'Segoe UI', system-ui, sans-serif; color: #fff;
+  }
+  #stage:not(.game-started) #hud,
+  #stage:not(.game-started) #crosshair,
+  #stage:not(.game-started) #hitmarker,
+  #stage:not(.game-started) #search-ring,
+  #stage:not(.game-started) #floater-layer {
+    display: none !important;
+  }
+  #room-transition {
+    position: absolute; inset: 0; z-index: 80;
+    display: none; opacity: 0;
+    background: #000; pointer-events: auto; cursor: none;
   }
   /* 暗角：低血(红) */
   #vignette {
@@ -33,33 +46,225 @@
     background: radial-gradient(ellipse at center, transparent 42%, rgba(30,60,170,.78) 100%);
     transition: opacity .3s;
   }
-  /* 左上：血量/神智 */
+  /* 左上：生命/神智半圆环 */
   #stat-panel {
-    position: absolute; top: 14px; left: 14px;
-    display: flex; flex-direction: column; gap: 6px;
+    position: absolute; top: 10px; left: 12px;
+    width: 126px; display: flex; flex-direction: column; align-items: center;
+    gap: 3px; pointer-events: none; z-index: 13;
   }
-  .sbar {
-    width: 220px; height: 16px; border-radius: 8px; overflow: hidden; position: relative;
-    background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.22);
+  #stat-rings {
+    position: relative; width: 116px; height: 116px;
   }
-  .sbar .fill { height: 100%; transition: width .15s; }
-  #hp-fill { background: linear-gradient(90deg,#a8182a,#e8504d); width: 100%; }
-  #san-fill { background: linear-gradient(90deg,#4455cc,#7d9bff); width: 100%; }
-  .sbar .lab {
-    position: absolute; inset: 0; font-size: 11px; line-height: 16px;
-    padding-left: 8px; text-shadow: 0 1px 2px #000;
+  .stat-svg {
+    position: absolute; inset: 0; width: 116px; height: 116px;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,.65));
   }
-  .sbar .num {
-    position: absolute; right: 8px; top: 0; font-size: 11px; line-height: 16px;
-    text-shadow: 0 1px 2px #000;
+  .ring-bg, .ring-fill {
+    fill: none; stroke-width: 10; stroke-linecap: round;
   }
-  /* 右上：金币/深度 */
-  #run-panel {
-    position: absolute; top: 14px; right: 18px; text-align: right;
-    font-weight: 700; text-shadow: 0 1px 3px #000;
+  .ring-bg { stroke: rgba(255,255,255,.16); }
+  #hp-fill { stroke: #e8504d; stroke-dasharray: 100 100; transition: stroke-dasharray .16s; }
+  #san-fill { stroke: #7d9bff; stroke-dasharray: 100 100; transition: stroke-dasharray .16s; }
+  #stat-center {
+    position: absolute; inset: 29px; border-radius: 50%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(7,10,17,.68); border: 1px solid rgba(255,255,255,.18);
+    box-shadow: inset 0 0 16px rgba(0,0,0,.42);
+    text-shadow: 0 1px 3px #000;
   }
-  #coins-text { font-size: 20px; color: #ffd24d; }
-  #depth-text { font-size: 14px; color: #b9c4d8; margin-top: 4px; }
+  #depth-label {
+    font-size: 10px; color: #9aa6bd; line-height: 1; margin-bottom: 2px;
+  }
+  #depth-text {
+    font-size: 24px; line-height: 1; color: #ffe4a0; font-weight: 900;
+  }
+  .stat-num {
+    position: absolute; bottom: 12px; font-size: 10px; line-height: 1;
+    font-weight: 900; text-shadow: 0 1px 3px #000;
+  }
+  #hp-text { left: 13px; color: #ff9a9a; }
+  #san-text { right: 13px; color: #aebcff; }
+  #shield-text {
+    min-width: 72px; padding: 3px 8px; border-radius: 999px;
+    background: rgba(4,7,12,.72); border: 1px solid rgba(102,204,255,.32);
+    color: #bfe9ff; font-size: 12px; font-weight: 900; text-align: center;
+    text-shadow: 0 1px 3px #000;
+  }
+  /* 左上：杀戮尖塔式路线小地图 */
+  #route-map-shade {
+    position: absolute; inset: 0;
+    display: none; pointer-events: auto; cursor: auto;
+    background: rgba(0,0,0,.82);
+    z-index: 40;
+  }
+  #stage.route-map-open #route-map-shade {
+    display: block;
+  }
+  #route-map {
+    position: absolute; top: 154px; left: 43px;
+    pointer-events: auto; z-index: 12; cursor: auto;
+  }
+  #stage.route-map-open #route-map {
+    z-index: 42;
+  }
+  #route-map * { cursor: auto; }
+  #route-map.route-collapsed {
+    width: 54px; height: 54px;
+  }
+  #route-map.route-expanded {
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: min(88%, 390px); max-height: 88%;
+    padding: 14px; border-radius: 10px;
+    background: rgba(8, 11, 18, .94);
+    border: 1px solid rgba(255,255,255,.26);
+    box-shadow: 0 12px 42px rgba(0,0,0,.72), 0 0 22px rgba(255,210,77,.14);
+  }
+  .route-icon-btn {
+    width: 54px; height: 54px; border-radius: 12px; cursor: pointer;
+    border: 2px solid rgba(255,210,77,.62);
+    background: rgba(12,16,26,.86); color: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,.55);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .route-icon-btn, .route-icon-btn * { cursor: pointer !important; }
+  .route-icon-btn:active { transform: scale(.94); }
+  .route-icon { font-size: 24px; line-height: 1; }
+  .route-progress {
+    margin-top: 3px; font-size: 10px; color: #ffd24d;
+    text-shadow: 0 1px 2px #000; font-weight: 800;
+  }
+  .route-head {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    font-size: 13px; color: #b9c4d8; text-shadow: 0 1px 2px #000;
+  }
+  .route-head strong { color: #ffe4a0; font-size: 15px; }
+  .route-map-close {
+    width: 24px; height: 24px; border-radius: 7px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.28);
+    background: rgba(20,26,40,.9); color: #fff;
+    font-size: 17px; line-height: 20px;
+  }
+  .route-map-close { cursor: pointer !important; }
+  .route-must-pick {
+    color: #7CFFB0; font-size: 12px; font-weight: 800;
+  }
+  .route-debug-badge {
+    color: #ff7068; font-size: 12px; font-weight: 900;
+    border: 1px solid rgba(255,112,104,.55); border-radius: 6px;
+    padding: 2px 6px; background: rgba(80,14,18,.42);
+  }
+  .route-canvas {
+    position: relative; height: min(58vh, 440px); min-height: 320px; margin: 10px 0;
+    overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+    border-radius: 8px; cursor: grab !important; touch-action: none;
+    background:
+      linear-gradient(180deg, rgba(0,0,0,.04), rgba(0,0,0,.14)),
+      url("assets/art/route/route-map-bg-dark-768.webp") center / cover no-repeat,
+      #020203;
+    box-shadow: inset 0 0 26px rgba(0,0,0,.58), inset 0 0 0 1px rgba(205,163,82,.10);
+    scrollbar-width: none; -ms-overflow-style: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .route-canvas::-webkit-scrollbar { display: none; }
+  .route-canvas.dragging {
+    cursor: grabbing !important; user-select: none;
+  }
+  .route-canvas.dragging .route-node {
+    pointer-events: none;
+  }
+  .route-map-content {
+    position: relative; width: 100%; min-height: 100%;
+    cursor: grab !important;
+  }
+  .route-canvas svg {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  .route-line {
+    stroke: rgba(255,255,255,.20); stroke-width: 2.4;
+    vector-effect: non-scaling-stroke;
+  }
+  .route-line.active {
+    stroke: rgba(255,210,77,.72); stroke-width: 3.2;
+  }
+  .route-node {
+    position: absolute; width: 44px; height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    transform: translate(-50%, -50%);
+    border-radius: 50%; font-size: 22px;
+    background: rgba(20,26,40,.96);
+    border: 1px solid rgba(255,255,255,.24);
+    filter: grayscale(.35); opacity: .62;
+    user-select: none;
+  }
+  .route-node.has-art {
+    width: 58px; height: 58px; padding: 0; overflow: visible;
+    background: transparent; border: 0; font-size: 0;
+  }
+  .route-node-art {
+    width: 100%; height: 100%; display: block; object-fit: cover;
+    border-radius: 50%; pointer-events: none; -webkit-user-drag: none;
+  }
+  .route-node-art-fallback {
+    display: none; font-size: 22px; line-height: 1;
+  }
+  .route-node-label {
+    position: absolute; left: 50%; top: calc(100% - 3px);
+    transform: translateX(-50%);
+    min-width: 34px; padding: 2px 5px; border-radius: 999px;
+    background: rgba(4,7,12,.78); border: 1px solid rgba(255,255,255,.18);
+    color: #f4e7c4; font-size: 10px; line-height: 1.1; font-weight: 800;
+    text-shadow: 0 1px 2px #000; white-space: nowrap; pointer-events: none;
+    z-index: 3;
+  }
+  .route-node.next .route-node-label,
+  .route-node.selectable .route-node-label {
+    color: #bfffd4; border-color: rgba(124,255,176,.42);
+    background: rgba(4,18,12,.82);
+  }
+  .route-node.current .route-node-label {
+    color: #fff6d6; border-color: rgba(255,255,255,.42);
+    background: rgba(26,22,12,.84);
+  }
+  .route-node.visited {
+    filter: none; opacity: 1;
+    border-color: rgba(255,210,77,.86);
+    box-shadow: 0 0 10px rgba(255,210,77,.45);
+  }
+  .route-node.current {
+    transform: translate(-50%, -50%) scale(1.14);
+    border-color: #fff; box-shadow: 0 0 14px rgba(255,255,255,.75);
+  }
+  .route-node.next {
+    filter: none; opacity: 1;
+    border-color: #7CFFB0;
+    box-shadow: 0 0 13px rgba(124,255,176,.65);
+  }
+  .route-node.selectable {
+    cursor: pointer !important;
+    animation: route-pulse 1s ease-in-out infinite alternate;
+  }
+  .route-node.debug-selectable {
+    filter: none; opacity: 1;
+    border-color: #ff7068;
+    box-shadow: 0 0 13px rgba(255,112,104,.68);
+  }
+  .route-node.selectable:hover {
+    transform: translate(-50%, -50%) scale(1.2);
+    border-color: #fff;
+  }
+  @keyframes route-pulse {
+    from { box-shadow: 0 0 10px rgba(124,255,176,.55); }
+    to { box-shadow: 0 0 22px rgba(124,255,176,.95); }
+  }
+  .route-gem { background: rgba(32,42,70,.96); }
+  .route-supply { background: rgba(34,54,46,.96); }
+  .route-blessing { background: rgba(16,45,78,.96); }
+  .route-curse { background: rgba(64,26,46,.96); }
+  .route-safehouse { background: rgba(36,48,58,.96); }
+  .route-shop { background: rgba(66,48,24,.96); }
+  .route-boss { background: rgba(70,22,22,.98); }
   /* 右上角拾取记录滚动列表 */
   #pickup-log {
     position: absolute; top: 44px; right: 14px; width: 190px;
@@ -135,12 +340,6 @@
     background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.3);
   }
   #search-fill { height: 100%; width: 0%; background: linear-gradient(90deg,#ffd24d,#ffefa0); }
-  #skip-btn {
-    padding: 6px 18px; font-size: 13px; font-weight: 700; cursor: pointer;
-    border: 1px solid rgba(255,255,255,.4); border-radius: 6px;
-    background: rgba(20,26,40,.8); color: #fff;
-  }
-  #skip-btn:hover { background: rgba(50,60,85,.9); }
   /* BOSS血条 */
   #boss-bar {
     position: absolute; top: 52px; left: 50%; transform: translateX(-50%);
@@ -161,7 +360,7 @@
   #weapon-name {
     font-size: 12px; color: #b9c4d8; text-shadow: 0 1px 2px #000; margin-top: 2px;
   }
-  /* 军械库/图鉴 */
+  /* 军械库/图鉴/养成 */
   .shop-row {
     display: flex; align-items: center; gap: 10px; font-size: 14px;
     background: #1d2235; border: 1px solid rgba(255,255,255,.18);
@@ -182,7 +381,7 @@
     display: flex; align-items: center; justify-content: center;
   }
   .g-item.locked { opacity: .35; filter: grayscale(1); }
-  .tab-row { display: flex; gap: 10px; }
+  .tab-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
   .tab-btn {
     padding: 6px 18px; font-size: 14px; cursor: pointer; border-radius: 6px;
     border: 1px solid rgba(255,255,255,.3); background: rgba(20,26,40,.8); color: #fff;
@@ -233,7 +432,7 @@
     position: absolute; inset: 0; display: none;
     align-items: center; justify-content: center; flex-direction: column; gap: 18px;
     background: rgba(5,4,8,.85); pointer-events: auto; cursor: auto;
-    font-family: 'Segoe UI', system-ui, sans-serif; color: #fff; z-index: 10;
+    font-family: 'Segoe UI', system-ui, sans-serif; color: #fff; z-index: 60;
   }
   .overlay h1 { font-size: 44px; text-shadow: 0 3px 10px #000; letter-spacing: 3px; }
   .overlay .sub { color: #9aa6bd; font-size: 14px; margin-top: -8px; }
@@ -244,7 +443,10 @@
   }
   .big-btn:hover { background: #e8c25c; }
   @media (max-width: 560px) {
-    .sbar { width: 150px; }
+    #stat-panel { top: 8px; left: 10px; transform: scale(.9); transform-origin: top left; }
+    #route-map { top: 142px; left: 38px; }
+    #route-map.route-expanded { width: calc(100% - 34px); padding: 12px; }
+    .route-canvas { height: min(56vh, 410px); min-height: 300px; }
     #ammo-text { font-size: 22px; }
     .overlay h1 { font-size: 30px; }
     .door-card { width: 160px !important; padding: 14px 10px !important; }
@@ -260,6 +462,17 @@
   }
   .door-card:hover { transform: translateY(-4px); border-color: #ffd24d; }
   .door-card .door-icon { font-size: 38px; }
+  .door-card .door-icon.has-art {
+    height: 62px; display: flex; align-items: center; justify-content: center;
+    font-size: 0;
+  }
+  .door-icon-art {
+    width: 58px; height: 58px; display: block; object-fit: cover;
+    border-radius: 50%;
+  }
+  .door-icon-art-fallback {
+    display: none; font-size: 38px; line-height: 1;
+  }
   .door-card strong { font-size: 19px; }
   .door-card em { font-size: 13px; color: #b9c4d8; font-style: normal; }
   #choice-cards, #extract-btns { display: flex; gap: 20px; }
@@ -269,6 +482,9 @@
     width: 30%; min-width: 104px; max-width: 168px; padding: 14px 8px; gap: 5px;
   }
   #choice-cards .door-card .door-icon { font-size: 30px; }
+  #choice-cards .door-card .door-icon.has-art { height: 46px; }
+  #choice-cards .door-card .door-icon-art { width: 44px; height: 44px; }
+  #choice-cards .door-card .door-icon-art-fallback { font-size: 30px; }
   #choice-cards .door-card strong { font-size: 15px; }
   #choice-cards .door-card em { font-size: 11px; }
   #extract-coins { font-size: 16px; color: #ffd24d; }
@@ -276,6 +492,34 @@
   #start-overlay { display: flex; }
   #start-overlay .rules {
     font-size: 14px; color: #b9c4d8; line-height: 2; text-align: center;
+  }
+  #home-settings-btn {
+    position: absolute; top: 14px; right: 14px; width: 42px; height: 42px;
+    border-radius: 10px; border: 1px solid rgba(255,255,255,.35);
+    background: rgba(12,16,26,.82); color: #fff; font-size: 20px;
+    cursor: pointer; pointer-events: auto;
+  }
+  #home-settings-btn:active { transform: scale(.94); }
+  #home-settings-panel {
+    position: absolute; top: 64px; right: 14px; width: 244px;
+    display: none; flex-direction: column; gap: 12px;
+    padding: 14px; border-radius: 10px;
+    background: rgba(12,16,26,.96); border: 1px solid rgba(255,255,255,.26);
+    box-shadow: 0 10px 28px rgba(0,0,0,.62);
+  }
+  #home-settings-panel.open { display: flex; }
+  .settings-panel-title {
+    font-size: 15px; color: #ffe4a0; font-weight: 900; text-align: left;
+  }
+  .setting-row {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; color: #e7e2d4; gap: 12px;
+  }
+  .setting-row strong { color: #ffe4a0; font-size: 13px; }
+  .setting-slider { width: 100%; accent-color: #c8a23c; }
+  .pause-settings {
+    width: 80%; max-width: 320px; display: flex; flex-direction: column;
+    gap: 10px; margin: 6px 0 14px;
   }
   #bank-text { font-size: 15px; color: #ffd24d; }
   /* ===== 触屏底部 HUD ===== */
@@ -312,28 +556,42 @@
     display: flex; gap: 10px; align-items: flex-end; pointer-events: auto;
   }
   #weapon-slots { display: flex; gap: 10px; align-items: flex-end; }
-  /* 物品栏(消耗品)+下拉 */
+  /* 物品栏(固定快捷道具)+下拉 */
   #item-wrap { position: relative; }
   #item-expand {
-    position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; border-radius: 50%;
-    border: 1px solid rgba(255,255,255,.4); background: rgba(20,26,40,.95); color: #fff;
-    font-size: 11px; cursor: pointer; pointer-events: auto; z-index: 2;
+    width: 64px; height: 64px; border-radius: 14px;
   }
   #item-dropdown {
-    position: absolute; bottom: 76px; left: 50%; transform: translateX(-50%);
+    position: absolute; bottom: 76px; right: 0;
     display: none; flex-direction: column; gap: 4px; padding: 6px;
     background: rgba(12,16,26,.96); border: 1px solid rgba(255,255,255,.3); border-radius: 10px;
-    pointer-events: auto; min-width: 150px; max-height: 240px; overflow-y: auto; z-index: 20;
+    pointer-events: auto; min-width: 190px; max-height: 260px; overflow-y: auto; z-index: 20;
   }
   #item-dropdown.open { display: flex; }
   .item-row {
-    display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px;
+    position: relative; display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border-radius: 6px;
     background: rgba(30,36,52,.9); color: #fff; cursor: pointer; font-size: 13px; white-space: nowrap;
   }
-  .item-row:active { background: #3a4466; }
+  .item-row:active, .item-row.selecting { background: #3a4466; }
+  .item-row.selecting { flex-wrap: wrap; }
+  .item-row.dragging { opacity: .45; }
   .item-row .ir-icon { font-size: 18px; }
   .item-row .ir-n { margin-left: auto; color: #b9c4d8; }
   .item-row .ir-desc { font-size: 10px; color: #8b96ad; }
+  .item-slot-menu {
+    flex: 0 0 100%; display: flex; gap: 6px;
+    padding: 6px 0 0; margin-top: 2px;
+    background: rgba(8,11,18,.98); border: 1px solid rgba(255,255,255,.28);
+    border-radius: 8px; box-shadow: 0 8px 20px rgba(0,0,0,.62);
+  }
+  .item-slot-menu button {
+    white-space: nowrap; border: 1px solid rgba(255,210,77,.42);
+    background: rgba(255,210,77,.16); color: #ffe4a0;
+    border-radius: 6px; padding: 5px 8px; font-size: 12px;
+    font-weight: 800; cursor: pointer;
+  }
+  .item-slot-menu button:hover { background: rgba(255,210,77,.28); }
   #bag-bullets { font-size: 15px; color: #ffd24d; }
   .wbtn .w-icon { font-weight: 800; }
   #aux-bar {
@@ -352,7 +610,28 @@
   .wbtn:active, .abtn:active { transform: scale(.93); }
   .wbtn .w-icon, .abtn .a-icon { font-size: 25px; line-height: 1; }
   .wbtn .w-ammo { font-size: 11px; color: #ffd24d; margin-top: 3px; font-weight: 700; }
+  .wbtn .w-key, .abtn .a-key {
+    display: none; position: absolute; top: -7px; right: -7px;
+    min-width: 18px; height: 18px; padding: 0 4px; border-radius: 5px;
+    align-items: center; justify-content: center;
+    background: rgba(255,210,77,.96); color: #1d1605;
+    border: 1px solid rgba(255,255,255,.55);
+    font-size: 11px; line-height: 18px; font-weight: 900;
+    box-shadow: 0 2px 8px rgba(0,0,0,.55);
+  }
+  .abtn .a-key { display: flex; }
+  .wbtn.swap-ready {
+    border-color: rgba(255,210,77,.62);
+    box-shadow: 0 0 10px rgba(255,210,77,.28);
+  }
+  .wbtn.swap-ready .w-key { display: flex; }
+  .abtn.drop-ok {
+    border-color: #7CFFB0;
+    box-shadow: 0 0 14px rgba(124,255,176,.66);
+  }
+  .abtn.empty.drop-ok { opacity: 1; }
   .abtn .a-n { font-size: 11px; color: #b9c4d8; margin-top: 3px; }
+  .abtn.expand-btn .a-n { font-size: 10px; }
   .wbtn.selected { border-color: #ffd24d; box-shadow: 0 0 16px rgba(255,210,77,.75); }
   .abtn.empty { opacity: .4; }
   /* 背包弹窗内的格子布局 */
@@ -362,6 +641,7 @@
   #bag-overlay #bag-value { font-size: 17px; color: #ffd24d; }
   @media (max-width: 560px) {
     .wbtn, .abtn { width: 56px; height: 56px; }
+    #item-expand { width: 56px; height: 56px; }
     .abtn.small { width: 46px; height: 46px; }
     #bag-btn { width: 54px; height: 54px; }
   }
@@ -466,35 +746,43 @@
 <div id="vignette-san"></div>
 <div id="hud">
   <div id="stat-panel">
-    <div class="sbar"><div id="hp-fill" class="fill"></div><div class="lab">生命</div><div id="hp-text" class="num">100</div></div>
-    <div class="sbar"><div id="san-fill" class="fill"></div><div class="lab">神智</div><div id="san-text" class="num">60</div></div>
+    <div id="stat-rings">
+      <svg class="stat-svg" viewBox="0 0 116 116" aria-hidden="true">
+        <path class="ring-bg" d="M58 104 A46 46 0 0 1 58 12"></path>
+        <path id="hp-fill" class="ring-fill" pathLength="100" d="M58 104 A46 46 0 0 1 58 12"></path>
+        <path class="ring-bg" d="M58 12 A46 46 0 0 1 58 104"></path>
+        <path id="san-fill" class="ring-fill" pathLength="100" d="M58 12 A46 46 0 0 1 58 104"></path>
+      </svg>
+      <div id="stat-center"><span id="depth-label">深度</span><strong id="depth-text">0</strong></div>
+      <div id="hp-text" class="stat-num">100</div>
+      <div id="san-text" class="stat-num">60</div>
+    </div>
+    <div id="shield-text">🛡 2/2</div>
   </div>
+  <div id="route-map-shade"></div>
+  <div id="route-map"></div>
   <div id="state-text">▶ 前进中…</div>
   <div id="boss-bar"><div id="boss-name"></div><div id="boss-track"><div id="boss-fill"></div></div></div>
-  <div id="run-panel">
-    <div id="depth-text">深度 0</div>
-  </div>
   <div id="pickup-log"></div>
   <div id="toast"></div>
   <div id="prompt"></div>
   <div id="search-panel">
     <div id="search-label"></div>
-    <button id="skip-btn">继续前进 ▶</button>
   </div>
   <button id="pause-btn">⏸</button>
   <!-- 触屏底部 HUD -->
   <button id="bag-btn">🎒<span id="bag-btn-val">0</span></button>
   <div id="action-bar">
     <div id="weapon-slots"></div>
-    <button id="nade-btn" class="abtn empty"><span class="a-icon">🧨</span><span class="a-n">×0</span></button>
+    <button id="nade-btn" class="abtn empty"><span class="a-key">1</span><span class="a-icon">🩹</span><span class="a-n">×0</span></button>
+    <button id="item-btn" class="abtn empty"><span class="a-key">2</span><span class="a-icon">💊</span><span class="a-n">×0</span></button>
     <div id="item-wrap">
-      <button id="item-btn" class="abtn empty"><span class="a-icon">🧪</span><span class="a-n">×0</span></button>
-      <button id="item-expand">▲</button>
+      <button id="item-expand" class="abtn expand-btn"><span class="a-key">TAB</span><span class="a-icon">▤</span><span class="a-n">展开</span></button>
       <div id="item-dropdown"></div>
     </div>
   </div>
   <div id="aux-bar">
-    <button id="skill-btn" class="abtn small empty" style="display:none"><span class="a-icon">🦉</span><span class="a-n">×0</span></button>
+    <button id="skill-btn" class="abtn small empty" style="display:none"><span class="a-key">E</span><span class="a-icon">🦉</span><span class="a-n">×0</span></button>
   </div>
 </div>
 <div id="crosshair"></div>
@@ -507,6 +795,7 @@
   <div class="sr-spin"><span class="sr-icon">🔍</span></div>
 </div>
 <div id="floater-layer"></div>
+<div id="room-transition"></div>
 <div id="choice-overlay" class="overlay">
   <h1 id="choice-title">选择路线</h1>
   <div class="sub" id="choice-sub">两扇门后是不同的命运</div>
@@ -551,7 +840,15 @@
 </div>
 <div id="pause-overlay" class="overlay">
   <h1>⏸ 已暂停</h1>
-  <div style="width:80%; max-width:320px; margin:6px 0 14px">
+  <div class="pause-settings">
+    <label class="setting-row">
+      <span>BGM 音量</span><strong id="pause-music-val">55%</strong>
+    </label>
+    <input id="pause-music-slider" class="setting-slider" type="range" min="0" max="1" step="0.01" value="0.55">
+    <label class="setting-row">
+      <span>音效音量</span><strong id="pause-sfx-val">90%</strong>
+    </label>
+    <input id="pause-sfx-slider" class="setting-slider" type="range" min="0" max="1" step="0.01" value="0.9">
     <label style="display:flex; justify-content:space-between; font-size:15px; margin-bottom:8px">
       <span>🖱 瞄准灵敏度</span><span id="sens-val">0.8×</span>
     </label>
@@ -560,7 +857,7 @@
   <button id="resume-btn" class="big-btn">继续游戏</button>
 </div>
 <div id="shop-overlay" class="overlay">
-  <h1>🛒 商店</h1>
+  <h1>🛒 局内商店</h1>
   <div id="shop-bank">金库 💰 0</div>
   <div id="shop-items"></div>
   <div style="display:flex; gap:14px">
@@ -574,12 +871,24 @@
   <button id="restart-btn" class="big-btn">再探一次</button>
 </div>
 <div id="start-overlay" class="overlay">
+  <button id="home-settings-btn" title="设置">⚙</button>
+  <div id="home-settings-panel">
+    <div class="settings-panel-title">设置</div>
+    <label class="setting-row">
+      <span>BGM 音量</span><strong id="home-music-val">55%</strong>
+    </label>
+    <input id="home-music-slider" class="setting-slider" type="range" min="0" max="1" step="0.01" value="0.55">
+    <label class="setting-row">
+      <span>音效音量</span><strong id="home-sfx-val">90%</strong>
+    </label>
+    <input id="home-sfx-slider" class="setting-slider" type="range" min="0" max="1" step="0.01" value="0.9">
+  </div>
   <h1>古墓不让进</h1>
-  <div class="sub">轻射击 PVE 搜打撤 · V4 ｜ 竖屏适配 · 触屏可玩</div>
+  <div class="sub">轻射击 PVE 搜打撤 · 地图路线原型 ｜ 竖屏适配 · 触屏可玩</div>
   <div id="bank-text"></div>
   <div class="rules">
-    自动前进，遭遇敌人时停下战斗 —— 鼠标瞄准，左键射击，<b style="color:#ff5c5c">爆头三倍伤害</b><br>
-    宝藏房点击箱子搜刮 ｜ 岔路口二选一 ｜ 每进一房消耗<b style="color:#7d9bff">神智</b><br>
+    在路线图上选择下一关，进入房间后遭遇敌人自动开战 —— 鼠标瞄准，左键射击，<b style="color:#ff5c5c">爆头三倍伤害</b><br>
+    宝藏房点击箱子搜刮 ｜ 关卡路线由地图节点决定 ｜ 战斗节点消耗<b style="color:#7d9bff">神智</b><br>
     撤离点可结算离场 —— <b style="color:#ffd24d">死了战利品就没了</b>
   </div>
   <div class="tab-row" id="chapter-row"></div>
@@ -590,8 +899,10 @@
   <div class="tab-row">
     <button id="tab-armory" class="tab-btn">🛠 军械库</button>
     <button id="tab-gallery" class="tab-btn">📖 收藏图鉴</button>
+    <button id="tab-progression" class="tab-btn">⬆ 养成</button>
   </div>
   <div id="armory-panel" style="display:none; flex-direction:column; gap:8px"></div>
+  <div id="progression-panel" style="display:none; flex-direction:column; gap:8px"></div>
   <div id="gallery" style="display:none"></div>
 </div>
 </div>
@@ -691,6 +1002,11 @@ class Input {
     return c;
   }
 
+  cancelPointer()       {
+    this.clicked = false;
+    this.mouseDown = false;
+  }
+
   isFiring()          {
     return this.mouseDown;
   }
@@ -717,22 +1033,111 @@ class Input {
 
 // ===== audio.ts =====
 // 程序化音效 + 微恐环境音（WebAudio）
+const MUSIC_VOLUME_KEY = 'tomb_music_volume_v1';
+const SFX_VOLUME_KEY = 'tomb_sfx_volume_v1';
+
+function clamp01(v        )         {
+  return Math.max(0, Math.min(1, v));
+}
+
 class AudioFX {
           ctx                      = null;
           master                  = null;
+          music                          = null;
+          pistolShots                     = [];
+          pistolShotCursor         = 0;
+          reloadClip                          = null;
+          reloadToken         = 0;
+          reloadLoopsLeft         = 0;
+                   reloadFallbackDuration         = 0.99;
+          musicStarted          = false;
+          musicPausedByGame          = false;
+          musicVolume         = this.loadVolume(MUSIC_VOLUME_KEY, 0.55);
+          sfxVolume         = this.loadVolume(SFX_VOLUME_KEY, 0.9);
           droneOsc                   = [];
           groanTimer         = 6;
           heartTimer         = 0;
+
+  constructor() {
+    this.setupMusic();
+    this.setupSfxSamples();
+  }
+
+          loadVolume(key        , fallback        )         {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw === null) return fallback;
+      const v = parseFloat(raw);
+      return Number.isFinite(v) ? clamp01(v) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+          saveVolume(key        , value        )       {
+    try { localStorage.setItem(key, value.toFixed(2)); } catch {}
+  }
 
   init()       {
     if (!this.ctx) {
       const AC = (window       ).AudioContext || (window       ).webkitAudioContext;
       this.ctx = new AC();
       this.master = this.ctx .createGain();
-      this.master.gain.value = 1;
+      this.master.gain.value = this.sfxVolume;
       this.master.connect(this.ctx .destination);
     }
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+    this.setupMusic();
+  }
+
+          setupMusic()       {
+    if (this.music) return;
+    this.music = new Audio('assets/audio/BGM.mp3');
+    this.music.loop = true;
+    this.music.preload = 'auto';
+    this.music.volume = this.musicVolume;
+  }
+
+          setupSfxSamples()       {
+    if (this.pistolShots.length <= 0) {
+      for (let i = 0; i < 4; i++) {
+        const shot = new Audio('assets/audio/pistol---one-shot_[cut_0sec].mp3');
+        shot.preload = 'auto';
+        shot.volume = this.sfxVolume;
+        this.pistolShots.push(shot);
+      }
+    }
+    if (!this.reloadClip) {
+      this.reloadClip = new Audio('assets/audio/pistol-reload.mp3');
+      this.reloadClip.preload = 'auto';
+      this.reloadClip.volume = this.sfxVolume;
+      this.reloadClip.load();
+    }
+  }
+
+  getMusicVolume()         { return this.musicVolume; }
+  getSfxVolume()         { return this.sfxVolume; }
+
+  setMusicVolume(value        )       {
+    this.musicVolume = clamp01(value);
+    this.saveVolume(MUSIC_VOLUME_KEY, this.musicVolume);
+    this.setupMusic();
+    if (this.music) this.music.volume = this.musicVolume;
+    if (this.musicVolume <= 0) {
+      if (this.music && !this.music.paused) this.music.pause();
+      return;
+    }
+    this.startAmbient();
+  }
+
+  setSfxVolume(value        )       {
+    this.sfxVolume = clamp01(value);
+    this.saveVolume(SFX_VOLUME_KEY, this.sfxVolume);
+    if (this.master) {
+      this.master.gain.value = this.sfxVolume;
+    }
+    for (const shot of this.pistolShots) shot.volume = this.sfxVolume;
+    if (this.reloadClip) this.reloadClip.volume = this.sfxVolume;
   }
 
           beep(
@@ -778,9 +1183,74 @@ class AudioFX {
     this.noise(0.16, 0.4, 2200);
     this.beep(160, 0.1, 'square', 0.16, 50);
   }
+  pistolShot()       {
+    this.setupSfxSamples();
+    const shot = this.pistolShots[this.pistolShotCursor % this.pistolShots.length];
+    this.pistolShotCursor += 1;
+    shot.volume = this.sfxVolume;
+    shot.currentTime = 0;
+    const pending = shot.play();
+    if (pending) {
+      pending.catch(() => this.gunshot());
+    }
+  }
+  click()       {
+    this.beep(980, 0.035, 'square', 0.035, 720);
+    this.beep(1320, 0.025, 'triangle', 0.025, undefined, 0.025);
+  }
   dryFire()       { this.beep(900, 0.04, 'square', 0.05); }
-  reloadStart()       { this.beep(500, 0.06, 'square', 0.07, 300); }
+          getReloadClipDuration()         {
+    if (this.reloadClip && Number.isFinite(this.reloadClip.duration) && this.reloadClip.duration > 0) {
+      return this.reloadClip.duration;
+    }
+    return this.reloadFallbackDuration;
+  }
+
+          stopReloadLoop()       {
+    this.reloadToken += 1;
+    this.reloadLoopsLeft = 0;
+    if (!this.reloadClip) return;
+    this.reloadClip.onended = null;
+    this.reloadClip.pause();
+    try { this.reloadClip.currentTime = 0; } catch {}
+  }
+
+  reloadStart(reloadDuration         = 0)       {
+    this.setupSfxSamples();
+    if (!this.reloadClip) {
+      this.beep(500, 0.06, 'square', 0.07, 300);
+      return;
+    }
+    this.stopReloadLoop();
+    const clipDuration = this.getReloadClipDuration();
+    const loops = reloadDuration > 0 ? Math.floor(reloadDuration / clipDuration) : 1;
+    if (loops <= 0) return;
+    const token = this.reloadToken;
+    this.reloadLoopsLeft = loops;
+
+    const playNext = ()       => {
+      if (token !== this.reloadToken || !this.reloadClip || this.reloadLoopsLeft <= 0) {
+        if (this.reloadClip) this.reloadClip.onended = null;
+        return;
+      }
+      const clip = this.reloadClip;
+      this.reloadLoopsLeft -= 1;
+      clip.onended = playNext;
+      clip.volume = this.sfxVolume;
+      clip.pause();
+      try { clip.currentTime = 0; } catch {}
+      const pending = clip.play();
+      if (pending) {
+        pending.catch(() => {
+          if (token === this.reloadToken) this.beep(500, 0.06, 'square', 0.07, 300);
+        });
+      }
+    };
+
+    playNext();
+  }
   reloadEnd()       {
+    this.stopReloadLoop();
     this.beep(700, 0.05, 'square', 0.08);
     this.beep(1100, 0.06, 'square', 0.07, undefined, 0.07);
   }
@@ -792,6 +1262,16 @@ class AudioFX {
   zombieDie()       { this.beep(120, 0.4, 'sawtooth', 0.12, 40); }
   zombieGroan(vol         = 0.07)       {
     this.beep(75 + Math.random() * 40, 0.7, 'sawtooth', vol, 55);
+  }
+  bossRoar()       {
+    this.noise(0.75, 0.34, 320);
+    this.beep(58, 0.9, 'sawtooth', 0.18, 32);
+    this.beep(96, 0.55, 'square', 0.08, 45, 0.12);
+  }
+  thunderLike()       {
+    this.noise(0.22, 0.22, 1800);
+    this.beep(88, 0.24, 'sawtooth', 0.12, 44);
+    this.beep(1500, 0.08, 'square', 0.06, 620, 0.02);
   }
   meleeHit()       {
     this.noise(0.12, 0.3, 800);
@@ -832,8 +1312,27 @@ class AudioFX {
 
   // 暗黑低音垫（持续环境音）
   startAmbient()       {
-    // 已移除背景音乐（低频持续drone），仅保留事件音效与氛围音
-    return;
+    this.setupMusic();
+    if (!this.music) return;
+    if (this.musicPausedByGame || this.musicVolume <= 0) return;
+    if (this.musicStarted && !this.music.paused) return;
+    this.musicStarted = true;
+    const pending = this.music.play();
+    if (pending) {
+      pending.catch(() => {
+        this.musicStarted = false;
+      });
+    }
+  }
+
+  pauseAmbient()       {
+    this.musicPausedByGame = true;
+    if (this.music && !this.music.paused) this.music.pause();
+  }
+
+  resumeAmbient()       {
+    this.musicPausedByGame = false;
+    this.startAmbient();
   }
 
   // 每帧：低神智心跳（已去除随机远处低吼）
@@ -861,11 +1360,18 @@ class AudioFX {
                                        
                                             
                                           
+                                                   
+                                                   
+                                                   
+                                                   
                                           
                                             
  
 
 const KEY = 'tomb_meta_v1';
+const HP_TRAINING_STEP = 10;
+const SANITY_TRAINING_STEP = 6;
+const RELOAD_TRAINING_MULT = 0.92;
 
 class Meta {
   data          ;
@@ -874,6 +1380,7 @@ class Meta {
     this.data = {
       bank: 0, bestDepth: 0, runs: 0, extracts: 0, checkpoint: 0,
       chaptersCleared: 0, shotgunOwned: false, pistolDmgLv: 0, magLv: 0,
+      shieldCapLv: 0, hpLv: 0, sanityLv: 0, reloadLv: 0,
       assistantOwned: false, collection: [],
     };
     try {
@@ -982,6 +1489,13 @@ const TREASURES                                                                 
   { name: '翡翠圣甲虫', icon: '🪲', rarity: 'epic', base: 140 },
   { name: '法老权杖', icon: '🪄', rarity: 'legend', base: 300 },
   { name: '失落王冠', icon: '👑', rarity: 'legend', base: 360 },
+];
+
+// 章节圣物（BOSS掉落，解锁下一章）
+const RELICS                                                  = [
+  { name: '法老黄金圣甲', icon: '🏆', value: 600 },
+  { name: '羽蛇神之心', icon: '💚', value: 800 },
+  { name: '十二金人残片', icon: '🥇', value: 1000 },
 ];
 
 function rollTreasure(depth        )               {
@@ -1315,6 +1829,7 @@ const BLESSINGS         = [
   { id: 'bless_calm',     name: '头脑冷静', icon: '🧊', boon: '进入房间消耗的理智 -1（最多3层）', curse: '' },
   { id: 'bless_reaper',   name: '死神之力', icon: '☠️', boon: '击杀后 15% 概率回 5 生命', curse: '' },
   { id: 'bless_marksman', name: '神枪手',   icon: '🎯', boon: '爆头伤害 +10%', curse: '' },
+  { id: 'bless_owl_fury', name: '夜枭共鸣', icon: '🦉', boon: '宠物伤害 +25%', curse: '' },
 ];
 
 // 神之诅咒（祭坛抉择）：以理智/生命（或上限）为代价换增益
@@ -1343,8 +1858,8 @@ function rollCurses()         { return pick(CURSES, 2); }
 
 // ===== rooms.ts =====
 
-// 房间类型（重构后只保留以下几类）
-                                                                                               
+// 房间类型（corridor 只用于开局过渡，不进入路线图）
+                                                                                                            
 
 // 章节主题（策划案"世界观"：金字塔/玛雅神庙/秦始皇陵）
                         
@@ -1378,14 +1893,48 @@ function themeForDepth(depth        )        {
 }
 
 const ROOM_INFO                                                               = {
+  corridor: { name: '入口回廊', icon: '🚪', hint: '进入古墓前的过渡区域' },
   supply:   { name: '补给之屋', icon: '🧰', hint: '清怪后可搜刮药品/弹药' },
   gem:      { name: '宝藏之屋', icon: '💎', hint: '清怪后可搜刮宝藏' },
   blessing: { name: '祝福祭坛', icon: '😇', hint: '精英镇守，击败后三选一纯增益' },
   curse:    { name: '诅咒祭坛', icon: '😈', hint: '祭坛抉择：以代价换强力增益' },
   safehouse:{ name: '安全屋', icon: '🏕️', hint: '点击篝火回理智，或有补给' },
-  shop:     { name: '商店', icon: '🛒', hint: '花金币购买道具' },
+  shop:     { name: '局内商店', icon: '🛒', hint: '花局内金币购买本局补给' },
   boss:     { name: 'BOSS·撤离点', icon: '👹', hint: '本章主宰，击败后可撤离' },
 };
+
+                            
+             
+                 
+                
+               
+                
+                  
+                   
+               
+                 
+ 
+
+                                   
+                     
+                           
+                      
+                 
+                
+                            
+                          
+ 
+
+                             
+                     
+                   
+                     
+ 
+
+                        
+                   
+                     
+ 
 
                        
                  
@@ -1492,6 +2041,15 @@ class Dungeon {
           nextZ         = 0; // 下一个房间入口z
           depthCount         = 0;
           lastShopDepth         = -10;  // 上一个商店所在深度（控制间隔）
+          routeNodes              = [];
+          routeCurrentId                = null;
+          routeSegmentStartDepth         = 0;
+          routeSegmentIndex         = 0;
+                   routeRoomsPerSegment         = 10;
+                   routeFloors         = 11;
+                   routeLanes         = 3;
+                   routeRestFloor         = 6;
+                   routeFixedLane         = 1;
 
   constructor(scene             , startDepth         = 0) {
     this.scene = scene;
@@ -1502,27 +2060,410 @@ class Dungeon {
     return this.depthCount;
   }
 
-  // 决定下一房间候选
-  nextOptions()             {
-    const d = this.depthCount + 1;
-    if (d % 30 === 0) return ['boss'];        // 章节BOSS=撤离点
-    if (d % 30 === 29) return ['shop'];       // BOSS 前必有商店
-    if (d % 10 === 5) return ['safehouse'];   // 周期安全屋
-    // 其余普通房：补给/宝石/祝福为常规候选；诅咒(25%)小概率进入候选池
-    const pool             = ['supply', 'gem', 'blessing'];
-    if (Math.random() < 0.25) pool.push('curse');
-    // 商店：前5个房间不刷；距上一个商店至少 5 个房间；满足时 35% 进入候选
-    if (d > 5 && (d - this.lastShopDepth) >= 5 && Math.random() < 0.35) pool.push('shop');
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
-    const count = Math.random() < 0.5 ? 2 : 3;
-    return pool.slice(0, Math.min(count, pool.length));
+  // 参考杀戮尖塔：每段 10 节，3 条主路线，少量横向连线，终点为 BOSS/撤离点。
+  nextChoices()              {
+    this.ensureRouteMap();
+    return this.availableRouteChoices();
   }
 
-  append(type          )       {
-    this.depthCount += 1;
+  routeSnapshot()                   {
+    this.ensureRouteMap();
+    const choices = this.peekRouteChoices().map((n) => n.id);
+    return {
+      nodes: this.routeNodes.map((n) => ({
+        ...n,
+        links: n.links.slice(),
+      })),
+      currentId: this.routeCurrentId,
+      choiceIds: choices,
+      floors: this.routeFloors,
+      lanes: this.routeLanes,
+      segmentStartDepth: this.routeSegmentStartDepth,
+      segmentEndDepth: this.routeSegmentStartDepth + this.routeRoomsPerSegment,
+    };
+  }
+
+  appendEntrance()       {
+    return this.append('corridor', false);
+  }
+
+  appendRouteNode(node           , matchNodeDepth          = false)       {
+    const live = this.routeNodes.find((n) => n.id === node.id);
+    if (!live) {
+      if (matchNodeDepth) this.depthCount = Math.max(0, node.depth - 1);
+      return this.append(node.type);
+    }
+    if (matchNodeDepth) this.depthCount = Math.max(0, live.depth - 1);
+    live.visited = true;
+    this.routeCurrentId = live.id;
+    return this.append(live.type);
+  }
+
+          availableRouteChoices()              {
+    if (this.routeCurrentId === null) return this.startRouteChoices();
+    const current = this.routeNodes.find((n) => n.id === this.routeCurrentId);
+    if (!current || current.links.length === 0) {
+      this.generateRouteMap();
+      return this.startRouteChoices();
+    }
+    return current.links
+      .map((id) => this.routeNodes.find((n) => n.id === id))
+      .filter((n)                 => !!n);
+  }
+
+          peekRouteChoices()              {
+    if (this.routeCurrentId === null) return this.startRouteChoices();
+    const current = this.routeNodes.find((n) => n.id === this.routeCurrentId);
+    if (!current || current.links.length === 0) return [];
+    return current.links
+      .map((id) => this.routeNodes.find((n) => n.id === id))
+      .filter((n)                 => !!n);
+  }
+
+          startRouteChoices()              {
+    const start = this.routeNodes.find((n) => n.type === 'corridor' && n.floor === 1);
+    if (!start) return [];
+    return start.links
+      .map((id) => this.routeNodes.find((n) => n.id === id))
+      .filter((n)                 => !!n);
+  }
+
+          ensureRouteMap()       {
+    if (this.routeNodes.length === 0) this.generateRouteMap();
+  }
+
+          generateRouteMap()       {
+    this.routeSegmentIndex += 1;
+    this.routeSegmentStartDepth = this.depthCount;
+    let best                           = null;
+    for (let i = 0; i < 120; i++) {
+      const candidate = this.buildRouteCandidate();
+      if (!best || candidate.fairness < best.fairness) best = candidate;
+    }
+
+    this.routeNodes = best ? best.nodes : this.buildRouteCandidate().nodes;
+    const start = this.routeNodes.find((n) => n.type === 'corridor' && n.floor === 1);
+    this.routeCurrentId = start ? start.id : null;
+  }
+
+          buildRouteCandidate()                    {
+    const nodes              = [];
+    const addNode = (id        , floor        , lane        , type          , visited          = false)            => {
+      const depth = this.routeDepthForFloor(floor);
+      const node            = {
+        id,
+        type,
+        floor,
+        lane,
+        depth,
+        links: [],
+        visited,
+        risk: this.routeRisk(type),
+        reward: this.routeReward(type),
+      };
+      nodes.push(node);
+      return node;
+    };
+
+    const segment = this.routeSegmentIndex;
+    const start = addNode(`r${segment}-start`, 1, this.routeFixedLane, 'corridor', true);
+    const rest = addNode(`r${segment}-rest`, this.routeRestFloor, this.routeFixedLane, 'safehouse');
+    const boss = addNode(`r${segment}-boss`, this.routeFloors, this.routeFixedLane, 'boss');
+
+    for (let floor = 2; floor < this.routeFloors; floor++) {
+      if (floor === this.routeRestFloor) continue;
+      if (floor === this.routeFloors - 1) {
+        addNode(`r${segment}-boss-shop`, floor, this.routeFixedLane, 'shop');
+        continue;
+      }
+      const floorTypes = this.rollRouteFloorTypes(floor);
+      for (let lane = 0; lane < this.routeLanes; lane++) {
+        addNode(`r${segment}-${floor}-${lane}`, floor, lane, floorTypes[lane]);
+      }
+    }
+
+    const byFloor = (floor        )              =>
+      nodes.filter((n) => n.floor === floor).sort((a, b) => a.lane - b.lane);
+    const link = (from           , to           )       => {
+      if (!from.links.includes(to.id)) from.links.push(to.id);
+    };
+    const linkAll = (from           , targets             )       => {
+      for (const target of targets) link(from, target);
+    };
+    const linkAllToFixed = (fromFloor        , target           )       => {
+      for (const node of byFloor(fromFloor)) link(node, target);
+    };
+
+    linkAll(start, byFloor(2));
+    for (let floor = 2; floor < this.routeRestFloor - 1; floor++) {
+      this.wireRandomFloor(nodes, floor, floor + 1);
+    }
+    linkAllToFixed(this.routeRestFloor - 1, rest);
+    linkAll(rest, byFloor(this.routeRestFloor + 1));
+    for (let floor = this.routeRestFloor + 1; floor < this.routeFloors - 1; floor++) {
+      this.wireRandomFloor(nodes, floor, floor + 1);
+    }
+    linkAllToFixed(this.routeFloors - 1, boss);
+
+    return this.evaluateRouteCandidate(nodes);
+  }
+
+          wireRandomFloor(nodes             , fromFloor        , toFloor        )       {
+    const fromNodes = nodes.filter((n) => n.floor === fromFloor).sort((a, b) => a.lane - b.lane);
+    const targetNodes = nodes.filter((n) => n.floor === toFloor).sort((a, b) => a.lane - b.lane);
+    if (fromNodes.length === 0 || targetNodes.length === 0) return;
+
+    const byLane = (lane        )            =>
+      targetNodes.slice().sort((a, b) => Math.abs(a.lane - lane) - Math.abs(b.lane - lane))[0];
+    const link = (from           , to           )       => {
+      if (!from.links.includes(to.id)) from.links.push(to.id);
+    };
+
+    for (const from of fromNodes) {
+      link(from, byLane(from.lane));
+      if (Math.random() < 0.58) {
+        const dir = from.lane === 0 ? 1 : from.lane === this.routeLanes - 1 ? -1 : (Math.random() < 0.5 ? -1 : 1);
+        link(from, byLane(from.lane + dir));
+      }
+      if (Math.random() < 0.16) {
+        link(from, targetNodes[Math.floor(Math.random() * targetNodes.length)]);
+      }
+    }
+
+    for (const target of targetNodes) {
+      const hasIncoming = fromNodes.some((from) => from.links.includes(target.id));
+      if (hasIncoming) continue;
+      const donor = fromNodes.slice().sort((a, b) => {
+        const laneDelta = Math.abs(a.lane - target.lane) - Math.abs(b.lane - target.lane);
+        return laneDelta !== 0 ? laneDelta : a.links.length - b.links.length;
+      })[0];
+      link(donor, target);
+    }
+  }
+
+          routeDepthForFloor(floor        )         {
+    if (floor <= 1) return this.routeSegmentStartDepth;
+    return this.routeSegmentStartDepth + Math.min(this.routeRoomsPerSegment, floor - 1);
+  }
+
+          rollRouteFloorTypes(floor        )             {
+    const depth = this.routeDepthForFloor(floor);
+    const requireAllDifferent = floor === 2;
+    let best             = [];
+    for (let i = 0; i < 12; i++) {
+      const types = Array.from({ length: this.routeLanes }, () => this.rollRouteType(floor, depth));
+      const unique = new Set(types).size;
+      if (requireAllDifferent ? unique === this.routeLanes : unique >= 2) return types;
+      if (unique > new Set(best).size) best = types;
+    }
+    if (new Set(best).size >= 2) return best;
+
+    const fallback             = floor <= 3
+      ? ['supply', 'gem', 'blessing']
+      : ['supply', 'gem', depth >= 6 ? 'shop' : 'blessing'];
+    return fallback.slice(0, this.routeLanes);
+  }
+
+          rollRouteType(floor        , depth        )           {
+    const weights                                       = [
+      { type: 'supply', weight: floor <= 3 ? 38 : 28 },
+      { type: 'gem', weight: floor <= 3 ? 30 : 32 },
+      { type: 'blessing', weight: floor <= 3 ? 12 : 18 },
+    ];
+    if (depth >= 4) weights.push({ type: 'curse', weight: 12 });
+    if (depth >= 6 && (depth - this.lastShopDepth) >= 4) weights.push({ type: 'shop', weight: 10 });
+    const total = weights.reduce((sum, item) => sum + item.weight, 0);
+    let roll = Math.random() * total;
+    for (const item of weights) {
+      roll -= item.weight;
+      if (roll <= 0) return item.type;
+    }
+    return weights[weights.length - 1].type;
+  }
+
+          evaluateRouteCandidate(nodes             )                    {
+    const scores = this.enumerateRouteScores(nodes);
+    if (scores.length === 0) return { nodes, fairness: Number.POSITIVE_INFINITY, routeCount: 0 };
+
+    const min = Math.min(...scores);
+    const max = Math.max(...scores);
+    const mean = scores.reduce((sum, s) => sum + s, 0) / scores.length;
+    const variance = scores.reduce((sum, s) => sum + (s - mean) * (s - mean), 0) / scores.length;
+    const std = Math.sqrt(variance);
+    const target = this.routeRoomsPerSegment * 12;
+    const routeCountPenalty = scores.length < 12 ? (12 - scores.length) * 15 : 0;
+    const typePenalty = this.routeTypeDiversityPenalty(nodes);
+    const choicePenalty = this.routeChoiceSimilarityPenalty(nodes);
+    const fairness = (max - min) * 5 + std * 3 + Math.abs(mean - target) * 0.7 + routeCountPenalty + typePenalty + choicePenalty;
+    return { nodes, fairness, routeCount: scores.length };
+  }
+
+          enumerateRouteScores(nodes             )           {
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const start = nodes.find((n) => n.type === 'corridor' && n.floor === 1);
+    const boss = nodes.find((n) => n.type === 'boss');
+    if (!start || !boss) return [];
+
+    const scores           = [];
+    const visit = (node           , score        , guard        )       => {
+      if (scores.length > 2000 || guard > this.routeFloors + 2) return;
+      const nextScore = score + this.routeNodeValue(node);
+      if (node.id === boss.id) {
+        scores.push(nextScore);
+        return;
+      }
+      for (const id of node.links) {
+        const next = byId.get(id);
+        if (next) visit(next, nextScore, guard + 1);
+      }
+    };
+    visit(start, 0, 0);
+    return scores;
+  }
+
+          routeNodeValue(node           )         {
+    const base                           = {
+      corridor: 0,
+      supply: 10,
+      gem: 15,
+      blessing: 19,
+      curse: 17,
+      safehouse: 10,
+      shop: 12,
+      boss: 22,
+    };
+    const riskPenalty = Math.round(sanityCostFor(node.type, node.depth) * 0.35);
+    const cursePenalty = node.type === 'curse' ? 2 : 0;
+    return base[node.type] - riskPenalty - cursePenalty;
+  }
+
+          routeTypeDiversityPenalty(nodes             )         {
+    const dynamic = nodes.filter((n) => n.type !== 'corridor' && n.type !== 'safehouse' && n.type !== 'boss');
+    const counts = new Map                  ();
+    for (const node of dynamic) counts.set(node.type, (counts.get(node.type) || 0) + 1);
+    const typeCount = counts.size;
+    const dominant = Math.max(...Array.from(counts.values())) / Math.max(1, dynamic.length);
+    return Math.max(0, dominant - 0.48) * 70 + (typeCount < 4 ? (4 - typeCount) * 10 : 0);
+  }
+
+          routeChoiceSimilarityPenalty(nodes             )         {
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    let penalty = 0;
+
+    for (const node of nodes) {
+      const targets = node.links
+        .map((id) => byId.get(id))
+        .filter((n)                 => !!n);
+      if (targets.length <= 1) continue;
+
+      const uniqueTypes = new Set(targets.map((t) => t.type)).size;
+      if (uniqueTypes === 1) {
+        penalty += 900;
+      } else {
+        penalty += (targets.length - uniqueTypes) * 65;
+      }
+
+      const profiles = targets.map((target) => this.routeProfileFrom(target, nodes));
+      for (let i = 0; i < profiles.length; i++) {
+        for (let j = i + 1; j < profiles.length; j++) {
+          const distance = this.routeProfileDistance(profiles[i], profiles[j]);
+          if (distance < 1.35) penalty += (1.35 - distance) * 240;
+          if (distance < 0.85) penalty += 260;
+        }
+      }
+    }
+
+    return penalty;
+  }
+
+          routeProfileFrom(start           , nodes             )               {
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const boss = nodes.find((n) => n.type === 'boss');
+    const focusTypes             = ['supply', 'gem', 'blessing', 'curse', 'shop'];
+    if (!boss) return { vector: new Array(16).fill(0), routeCount: 0 };
+
+    const paths                = [];
+    const visit = (node           , path             , guard        )       => {
+      if (paths.length >= 600 || guard > this.routeFloors + 2) return;
+      const nextPath = path.concat(node);
+      if (node.id === boss.id) {
+        paths.push(nextPath);
+        return;
+      }
+      for (const id of node.links) {
+        const next = byId.get(id);
+        if (next) visit(next, nextPath, guard + 1);
+      }
+    };
+    visit(start, [], 0);
+
+    if (paths.length === 0) return { vector: new Array(16).fill(0), routeCount: 0 };
+
+    const scores = paths.map((path) => path.reduce((sum, node) => sum + this.routeNodeValue(node), 0));
+    const meanScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+    const minScore = Math.min(...scores);
+    const maxScore = Math.max(...scores);
+    const meanLength = paths.reduce((sum, path) => sum + path.length, 0) / paths.length;
+
+    const immediate = focusTypes.map((type) => start.type === type ? 2.5 : 0);
+    const typeRates = focusTypes.map((type) => {
+      let total = 0;
+      for (const path of paths) {
+        const dynamic = path.filter((node) => focusTypes.includes(node.type));
+        const count = dynamic.filter((node) => node.type === type).length;
+        total += count / Math.max(1, dynamic.length);
+      }
+      return (total / paths.length) * 4;
+    });
+
+    return {
+      vector: [
+        meanScore / 25,
+        minScore / 25,
+        maxScore / 25,
+        meanLength / 10,
+        ...immediate,
+        ...typeRates,
+        Math.min(2, paths.length / 10),
+      ],
+      routeCount: paths.length,
+    };
+  }
+
+          routeProfileDistance(a              , b              )         {
+    const len = Math.max(a.vector.length, b.vector.length);
+    let distance = 0;
+    for (let i = 0; i < len; i++) {
+      distance += Math.abs((a.vector[i] || 0) - (b.vector[i] || 0));
+    }
+    distance += Math.abs(a.routeCount - b.routeCount) * 0.04;
+    return distance;
+  }
+
+          routeRisk(type          )         {
+    if (type === 'corridor') return '入口';
+    if (type === 'boss') return '首领战';
+    if (type === 'blessing') return '精英镇守';
+    if (type === 'curse') return '代价抉择';
+    if (type === 'shop' || type === 'safehouse') return '安全节点';
+    if (type === 'gem') return '中等战斗';
+    return '低压战斗';
+  }
+
+          routeReward(type          )         {
+    if (type === 'corridor') return '选择路径';
+    if (type === 'boss') return '圣物/撤离';
+    if (type === 'gem') return '高价值藏品';
+    if (type === 'supply') return '补给/弹药';
+    if (type === 'blessing') return '纯增益';
+    if (type === 'curse') return '强增益/代价';
+    if (type === 'safehouse') return '回复/检查点';
+    if (type === 'shop') return '购买补强';
+    return '继续深入';
+  }
+
+  append(type          , countDepth          = true)       {
+    if (countDepth) this.depthCount += 1;
     if (type === 'shop') this.lastShopDepth = this.depthCount;  // 记录商店深度（控制间隔）
     // 纵深加大（前后空间更大，左右宽度不变）
     const length = type === 'shop' ? 16 : type === 'curse' ? 16 : type === 'safehouse' ? 18 : type === 'boss' ? 34 : 24;
@@ -2233,6 +3174,10 @@ class PlayerRig {
   position                = new THREE.Vector3(0, 0, 2);
   hp         = 100;
   maxHp         = 100;
+           shieldUnit         = 35;
+  shieldSlots         = 2;
+  shield         = 70;
+  maxShield         = 70;
   sanity         = 60;
   maxSanity         = 60;
   coins         = 0;       // 本局战利品
@@ -2392,6 +3337,43 @@ class PlayerRig {
     return this.faceYaw;
   }
 
+  teleportTo(pos               )       {
+    this.position.copy(pos);
+    this.aiming = false;
+    this.aimTarget = null;
+    this.faceYaw = 0;
+    this.facePitch = 0;
+    this.aimBaseYaw = 0;
+    this.aimBasePitch = 0;
+    this.aimAnchor.set(0, 0);
+    this.aimJustEntered = false;
+    this.recoil = 0;
+    this.muzzleFlash.intensity = 0;
+
+    this.rig.position.copy(this.position);
+    this.rig.rotation.y = this.faceYaw;
+    this.upperBody.rotation.x = this.facePitch;
+    this.rig.updateMatrixWorld(true);
+    this.gun.getWorldPosition(this.muzzlePos);
+
+    const camPos = new THREE.Vector3(
+      this.position.x + 0.9,
+      this.position.y + 2.85,
+      this.position.z + 4.4
+    );
+    const lookAt = new THREE.Vector3(
+      this.position.x + 0.9,
+      this.position.y + 2.35,
+      this.position.z - 10
+    );
+    this.camera.position.copy(camPos);
+    this.camera.lookAt(lookAt);
+    this.camera.fov = this.hipFov;
+    this.camera.updateProjectionMatrix();
+    this.flashlight.position.copy(camPos);
+    this.flashlight.target.position.copy(lookAt);
+  }
+
   // 进入瞄准：准星(屏幕中心)立即对准点击方向(baseYaw/basePitch)，并以光标NDC为基准做相对偏移
   enterAim(baseYaw        , basePitch        , anchorNDC               )       {
     this.aimBaseYaw = baseYaw;
@@ -2444,8 +3426,12 @@ class PlayerRig {
     this.fireCooldown = this.weapon.fireInterval;
     this.recoil = this.weapon.pellets > 1 ? 1.6 : 1;
     this.muzzleFlash.intensity = 8;
-    audio.gunshot();
-    if (this.weapon.pellets > 1) audio.gunshot();
+    if (this.weapon.ammoType === 'pistol') {
+      audio.pistolShot();
+    } else {
+      audio.gunshot();
+      if (this.weapon.pellets > 1) audio.gunshot();
+    }
     if (this.ammo <= 0) this.startReload(audio);
     return true;
   }
@@ -2454,7 +3440,7 @@ class PlayerRig {
     if (this.reloading > 0 || this.ammo >= this.magSize) return;
     if (this.reserveCache <= 0) return;   // 没有备用子弹则无法换弹
     this.reloading = this.reloadTime;
-    audio.reloadStart();
+    audio.reloadStart(this.reloadTime);
   }
 
   // 是否还有备用子弹（供 UI/提示判断）
@@ -2462,13 +3448,73 @@ class PlayerRig {
     return this.reserveCache > 0;
   }
 
+  takeMonsterDamage(amount        )                                         {
+    if (!this.alive) return { hpLost: 0, shieldLost: 0 };
+    const hpBefore = this.hp;
+    const shieldBefore = this.shieldCount;
+    let dmg = amount * this.dmgTakenMult;
+    if (this.shield > 0) {
+      const unitsNeeded = Math.max(1, Math.ceil(dmg / this.shieldUnit));
+      const blocked = Math.min(this.shield, unitsNeeded * this.shieldUnit);
+      this.shield -= blocked;
+      dmg = Math.max(0, dmg - blocked);
+    }
+    if (dmg > 0) {
+      this.hp -= dmg;
+      if (this.hp <= 0) {
+        this.hp = 0;
+        this.alive = false;
+      }
+    }
+    return {
+      hpLost: Math.max(0, Math.ceil(hpBefore - this.hp)),
+      shieldLost: Math.max(0, shieldBefore - this.shieldCount),
+    };
+  }
+
   takeDamage(amount        )       {
-    if (!this.alive) return;
-    this.hp -= amount * this.dmgTakenMult;
+    this.takeMonsterDamage(amount);
+  }
+
+  spendHp(amount        , lethal          = false)         {
+    if (!this.alive) return 0;
+    const before = this.hp;
+    this.hp = lethal
+      ? Math.max(0, this.hp - amount)
+      : Math.max(1, this.hp - amount);
     if (this.hp <= 0) {
       this.hp = 0;
       this.alive = false;
     }
+    return Math.max(0, Math.ceil(before - this.hp));
+  }
+
+  configureShieldSlots(slots        , fill          = false)       {
+    this.shieldSlots = Math.max(0, Math.floor(slots));
+    this.maxShield = this.shieldSlots * this.shieldUnit;
+    this.shield = fill ? this.maxShield : Math.min(this.shield, this.maxShield);
+  }
+
+  get shieldCount()         {
+    return this.shield <= 0 ? 0 : Math.ceil(this.shield / this.shieldUnit);
+  }
+
+  get maxShieldCount()         {
+    return this.shieldSlots;
+  }
+
+  addShield(amount        , temporaryCap         = 0)         {
+    if (!this.alive) return 0;
+    if (temporaryCap > this.maxShield) {
+      this.configureShieldSlots(Math.ceil(temporaryCap / this.shieldUnit), false);
+    }
+    const before = this.shield;
+    this.shield = Math.min(this.maxShield, this.shield + amount);
+    return this.shield - before;
+  }
+
+  addShieldUnits(units        )         {
+    return this.addShield(units * this.shieldUnit, this.maxShield);
   }
 
   heal(v        )       {
@@ -2616,19 +3662,12 @@ class TombBoss {
   removed          = false;
   phase         = 1;
 
-          speed         = 1.1;
-          chargeTimer         = 4;
-          charging         = 0;
-          chargeDir                = new THREE.Vector3();
           spitTimer         = 2.5;
-          summonTimer         = 6;
-          attackTimer         = 0;
           deathTimer         = 0;
           bodyMat                            ;
           flashTimer         = 0;
 
   onSpit                                           = null;
-  onSummon                                        = null;
 
   constructor(scene             , pos               , chapter        ) {
     const names = ['沙之暴君', '羽蛇祭司', '青铜俑将'];
@@ -2689,7 +3728,7 @@ class TombBoss {
     scene.add(this.mesh);
   }
 
-  // 返回本帧近战命中次数
+  // 返回本帧命中次数
   update(dt        , time        , playerPos               , audio         )         {
     if (this.dead) {
       this.deathTimer += dt;
@@ -2701,7 +3740,6 @@ class TombBoss {
     // 阶段切换
     if (this.phase === 1 && this.hp < this.maxHp * 0.5) {
       this.phase = 2;
-      this.speed = 1.5;
       this.bodyMat.emissive.setHex(0x441111);
       audio.zombieGroan(0.16);
     }
@@ -2709,44 +3747,26 @@ class TombBoss {
     const to = new THREE.Vector3().subVectors(playerPos, this.mesh.position);
     to.y = 0;
     const dist = to.length();
-    to.normalize();
-
-    if (this.charging > 0) {
-      this.charging -= dt;
-      this.mesh.position.addScaledVector(this.chargeDir, 7.5 * dt);
-    } else {
-      this.chargeTimer -= dt;
-      if (this.chargeTimer <= 0) {
-        this.chargeTimer = this.phase === 2 ? 4.5 : 6;
-        this.charging = 0.9;
-        this.chargeDir.copy(to);
-        audio.zombieGroan(0.14);
-      } else {
-        this.mesh.position.addScaledVector(to, this.speed * dt);
-      }
+    if (dist > 0.001) {
+      to.normalize();
+      this.mesh.rotation.y = Math.atan2(to.x, to.z);
     }
-    this.mesh.rotation.y = Math.atan2(to.x, to.z);
     this.mesh.position.y = Math.abs(Math.sin(time * 3)) * 0.06;
 
-    // 二阶段：吐弹 + 召唤
-    if (this.phase === 2) {
-      this.spitTimer -= dt;
-      if (this.spitTimer <= 0 && this.onSpit) {
-        this.spitTimer = 2.8;
-        for (let i = 0; i < 3; i++) {
-          this.onSpit(this.mesh.position.clone().setY(this.mesh.position.y + 4));
-        }
+    // 玩家不能移动时，BOSS 只作为远程火力点存在：不追击、不冲锋、不近战。
+    this.spitTimer -= dt;
+    if (this.spitTimer <= 0 && this.onSpit && dist > 2.5 && dist < 32) {
+      const volley = this.phase === 2 ? 3 : 1;
+      this.spitTimer = this.phase === 2 ? 2.4 : 3.0;
+      for (let i = 0; i < volley; i++) {
+        const side = i - (volley - 1) / 2;
+        this.onSpit(
+          this.mesh.position.clone()
+            .setY(this.mesh.position.y + 4)
+            .add(new THREE.Vector3(side * 0.55, 0, 0))
+        );
       }
-      this.summonTimer -= dt;
-      if (this.summonTimer <= 0 && this.onSummon) {
-        this.summonTimer = 9;
-        for (let i = 0; i < 2; i++) {
-          const a = Math.random() * Math.PI * 2;
-          this.onSummon(this.mesh.position.clone().add(
-            new THREE.Vector3(Math.cos(a) * 3, 0, Math.sin(a) * 3)
-          ));
-        }
-      }
+      audio.zombieGroan(this.phase === 2 ? 0.12 : 0.08);
     }
 
     if (this.flashTimer > 0) {
@@ -2756,12 +3776,6 @@ class TombBoss {
       }
     }
 
-    this.attackTimer -= dt;
-    if (dist < 2.6 && this.attackTimer <= 0) {
-      this.attackTimer = 1.6;
-      audio.meleeHit();
-      return 1;
-    }
     return 0;
   }
 
@@ -2796,15 +3810,25 @@ class TombBoss {
 
 // ===== assistant.ts =====
 
+                                  
+                          
+                  
+ 
+
 // 助手"夜枭"（策划案"助手"：2被动+1主动）
-// 被动1：搜索速度+35% ｜ 被动2：每进新房间回1神智 ｜ 主动(4键)：群体电击，每局3次
+// 被动1：搜索速度+35% ｜ 被动2：每进新房间回1神智 ｜ 自动普攻 ｜ 主动(E键)：群体电击，每局3次
 class Assistant {
   mesh             ;
+           maxCharges         = 3;
   charges         = 3;
            searchSpeedMult         = 1.35;
            sanityPerRoom         = 1;
+           autoAttackInterval         = 1.35;
+           autoAttackRange         = 14;
+           skillRange         = 13;
           wing            ;
           zapFx                                      = [];
+          autoAttackTimer         = 0.65;
 
   constructor(scene             ) {
     this.mesh = new THREE.Group();
@@ -2838,6 +3862,7 @@ class Assistant {
     );
     this.mesh.position.lerp(target, Math.min(1, dt * 5));
     this.wing.rotation.z += dt * 3;
+    this.autoAttackTimer = Math.max(0, this.autoAttackTimer - dt);
 
     for (const fx of this.zapFx) {
       fx.age += dt;
@@ -2852,36 +3877,50 @@ class Assistant {
     this.zapFx = this.zapFx.filter((f) => f.age <= 0.25);
   }
 
-  // 主动技能：电击10米内全部敌人。返回是否释放成功
-  zapAll(zombies          , scene             , audio         , onHit                     )          {
+  readyAutoAttack()          {
+    return this.autoAttackTimer <= 0;
+  }
+
+  recoverCharge(amount         = 1)         {
+    const before = this.charges;
+    this.charges = Math.min(this.maxCharges, this.charges + Math.max(0, amount));
+    return this.charges - before;
+  }
+
+  fireAutoAttack(scene             , audio         , targetPos               )       {
+    this.autoAttackTimer = this.autoAttackInterval;
+    this.drawBeam(scene, targetPos, 0.022, 0.72);
+    audio.searchTick();
+  }
+
+  castAoe(targets                   , scene             , audio         )          {
     if (this.charges <= 0) return false;
-    let any = false;
-    for (const z of zombies) {
-      if (z.dead) continue;
-      if (z.mesh.position.distanceTo(this.mesh.position) < 12) {
-        any = true;
-        onHit(z);
-        // 电弧
-        const a = this.mesh.position;
-        const b = z.mesh.position.clone().setY(z.mesh.position.y + 1);
-        const mid = a.clone().add(b).multiplyScalar(0.5);
-        const len = a.distanceTo(b);
-        const beam = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.03, 0.03, len, 4),
-          new THREE.MeshBasicMaterial({ color: 0xaaf0ff, transparent: true, opacity: 0.9 })
-        );
-        beam.position.copy(mid);
-        beam.quaternion.setFromUnitVectors(
-          new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize()
-        );
-        scene.add(beam);
-        this.zapFx.push({ mesh: beam, age: 0 });
-      }
+    const hits = targets.filter((target) => target.position.distanceTo(this.mesh.position) <= this.skillRange);
+    if (hits.length === 0) return false;
+    for (const target of hits) {
+      target.hit();
+      this.drawBeam(scene, target.position, 0.035, 0.95);
     }
-    if (!any) return false;
     this.charges -= 1;
     audio.thunderLike();
     return true;
+  }
+
+          drawBeam(scene             , targetPos               , radius        , opacity        )       {
+    const a = this.mesh.position;
+    const b = targetPos.clone();
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    const len = Math.max(0.1, a.distanceTo(b));
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius, len, 4),
+      new THREE.MeshBasicMaterial({ color: 0xaaf0ff, transparent: true, opacity })
+    );
+    beam.position.copy(mid);
+    beam.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize()
+    );
+    scene.add(beam);
+    this.zapFx.push({ mesh: beam, age: 0 });
   }
 }
 
@@ -2896,12 +3935,49 @@ class Assistant {
  
 
 const CELL = 44;
+const QUICK_SLOT_KEY = 'tomb_quick_slots_v1';
+const QUICK_SLOT_DEFAULTS                   = ['med', 'sedative'];
+
+const ROOM_ART                         = {
+  corridor: 'assets/art/route/route-start-256.webp',
+  supply: 'assets/art/route/route-supply-256.webp',
+  gem: 'assets/art/route/route-gem-256.webp',
+  blessing: 'assets/art/route/route-blessing-256.webp',
+  curse: 'assets/art/route/route-curse-256.webp',
+  safehouse: 'assets/art/route/route-campfire-256.webp',
+  shop: 'assets/art/route/route-shop-256.webp',
+  boss: 'assets/art/route/route-boss-256.webp',
+};
+
+const ROOM_LABEL                         = {
+  corridor: '起点',
+  supply: '补给',
+  gem: '宝藏',
+  blessing: '祝福',
+  curse: '献祭',
+  safehouse: '篝火',
+  shop: '商店',
+  boss: 'BOSS',
+};
+
+function hasRoomArt(type        )          {
+  return ROOM_ART[type] !== undefined;
+}
+
+function roomArtHtml(type        , fallbackIcon        , className        )         {
+  const src = ROOM_ART[type];
+  if (!src) return fallbackIcon;
+  return `<img class="${className}" src="${src}" alt="" loading="lazy" decoding="async" ` +
+    `onerror="this.style.display='none';this.nextElementSibling.style.display='inline'">` +
+    `<span class="${className}-fallback">${fallbackIcon}</span>`;
+}
 
 class HUD {
           hpFill             ;
           hpText             ;
           sanFill             ;
           sanText             ;
+          shieldText             ;
           pickupLog              ;
           depthText             ;
           stateText             ;
@@ -2911,10 +3987,11 @@ class HUD {
           promptEl             ;
           vignette             ;
           sanVignette              ;
+          roomTransition             ;
+          routeMap             ;
           floaterLayer             ;
           searchPanel             ;
           searchLabel             ;
-          skipBtn             ;
           choiceOverlay             ;
           choiceCards             ;
           extractOverlay             ;
@@ -2936,9 +4013,10 @@ class HUD {
           itemBtn             ;
           itemExpand             ;
           itemDropdown             ;
-          mostNeededKind                        = null;
           skillBtn             ;
           selIndex         = 0;
+          quickSlots                   = QUICK_SLOT_DEFAULTS.slice();
+          quickSlotMenu                     = null;
 
   // 网格背包
           bagOverlay             ;
@@ -2967,9 +4045,19 @@ class HUD {
           adsMode          = false;
           floaters            = [];
           stage             ;
+          routeMapExpanded          = false;
+          routeChoiceMode          = false;
+          routeDebugMode          = false;
+          routeSnapshot                          = null;
+          routeMapDragViewport                     = null;
+          routeMapDragPointerId         = -1;
+          routeMapDragStartX         = 0;
+          routeMapDragStartY         = 0;
+          routeMapDragStartScrollTop         = 0;
+          routeMapDragMoved          = false;
+          routeMapSuppressClickUntil         = 0;
 
-  onSkipSearch                      = null;
-  onChoice                                 = null;
+  onChoice                                     = null;
   onExtract                                    = null;
   onIntelContinue                      = null;
   onWeaponTap                                   = null;
@@ -2980,23 +4068,36 @@ class HUD {
   onUseConsumableItem                                          = null; // 在背包内使用消耗品
   onBagToggle                                   = null;    // 打开/关闭背包（暂停）
   onPauseToggle                                     = null; // 暂停按钮
+  onRouteMapToggle                                   = null; // 展开路线图（暂停）
   onSensitivity                               = null;       // 瞄准灵敏度滑块
 
   constructor() {
     const $ = (id        )              => document.getElementById(id) ;
+    this.quickSlots = this.loadQuickSlots();
     this.stage = $('stage');
     this.hpFill = $('hp-fill'); this.hpText = $('hp-text');
     this.sanFill = $('san-fill'); this.sanText = $('san-text');
+    this.shieldText = $('shield-text');
     this.pickupLog = $('pickup-log'); this.depthText = $('depth-text');
     this.stateText = $('state-text');
     this.crosshair = $('crosshair'); this.hitmarker = $('hitmarker');
     this.toastEl = $('toast'); this.promptEl = $('prompt');
     this.vignette = $('vignette');
     this.sanVignette = $('vignette-san');
+    this.roomTransition = $('room-transition');
+    this.routeMap = $('route-map');
+    this.routeMap.addEventListener('click', (e) => this.onRouteMapClick(e));
+    this.routeMap.addEventListener('pointerdown', (e) => this.onRouteMapDragStart(e));
+    window.addEventListener('pointerdown', (e) => this.onRouteMapOutsidePointer(e), true);
+    window.addEventListener('pointermove', (e) => this.onRouteMapDragMove(e), true);
+    window.addEventListener('pointerup', (e) => this.onRouteMapDragEnd(e), true);
+    window.addEventListener('pointercancel', (e) => this.onRouteMapDragEnd(e), true);
+    window.addEventListener('keydown', (e) => this.onRouteMapKeyDown(e), true);
+    window.addEventListener('keydown', (e) => this.onBagKeyDown(e), true);
+    window.addEventListener('keydown', (e) => this.onItemExpandKeyDown(e), true);
     this.floaterLayer = $('floater-layer');
     this.searchPanel = $('search-panel');
     this.searchLabel = $('search-label');
-    this.skipBtn = $('skip-btn');
     this.choiceOverlay = $('choice-overlay');
     this.choiceCards = $('choice-cards');
     this.extractOverlay = $('extract-overlay');
@@ -3036,7 +4137,6 @@ class HUD {
     });
     $('shop-refresh').addEventListener('click', () => { if (this.onShopRefresh) this.onShopRefresh(); });
 
-    this.skipBtn.addEventListener('click', () => { if (this.onSkipSearch) this.onSkipSearch(); });
     $('extract-yes').addEventListener('click', () => {
       this.extractOverlay.style.display = 'none';
       if (this.onExtract) this.onExtract(true);
@@ -3075,33 +4175,43 @@ class HUD {
       el.addEventListener('click', () => this.onSlotClick(slot));
     });
 
-    // 消耗品按钮
-    this.nadeBtn.addEventListener('click', () => { if (this.onUseConsumable) this.onUseConsumable('grenade'); });
-    // 物品栏：主按钮使用“最需要”的消耗品；▲ 展开下拉选择任意消耗品
-    this.itemBtn.addEventListener('click', () => {
-      if (this.mostNeededKind && this.onUseConsumable) this.onUseConsumable(this.mostNeededKind);
-    });
+    // 快捷消耗品槽：1/2 使用当前绑定道具；TAB 展开背包道具并替换绑定。
+    this.nadeBtn.addEventListener('click', () => this.useQuickSlot(0));
+    this.itemBtn.addEventListener('click', () => this.useQuickSlot(1));
+    this.wireQuickSlotDrop(this.nadeBtn, 0);
+    this.wireQuickSlotDrop(this.itemBtn, 1);
     this.itemExpand.addEventListener('click', (e) => { e.stopPropagation(); this.toggleItemDropdown(); });
+    this.itemDropdown.addEventListener('click', (e) => {
+      if (e.target === this.itemDropdown) this.closeItemDropdown();
+    });
     this.skillBtn.addEventListener('click', () => { if (this.onUseSkill) this.onUseSkill(); });
 
     // 拖拽全局监听
+    window.addEventListener('pointerdown', (e) => this.onItemDropdownOutsidePointer(e), true);
     window.addEventListener('pointermove', (e) => this.onPointerMove(e));
     window.addEventListener('pointerup', (e) => this.onPointerUp(e));
   }
 
-  bindBag(bag          )       { this.bag = bag; }
+  bindBag(bag          )       {
+    this.bag = bag;
+    this.renderQuickSlot(0);
+    this.renderQuickSlot(1);
+  }
 
   update(
-    dt        , hp        , maxHp        , sanity        , maxSanity        ,
+    dt        , hp        , maxHp        , shieldCount        , maxShieldCount        , sanity        , maxSanity        ,
     ammo        , magSize        , reloading        , reloadTime        ,
     bagValue        , depth        , stateLabel        , mousePx                          ,
     reserve        , coins        
   )       {
-    this.hpFill.style.width = `${Math.max(0, (hp / maxHp) * 100)}%`;
+    const hpPct = Math.max(0, Math.min(100, (hp / maxHp) * 100));
+    const sanPct = Math.max(0, Math.min(100, (sanity / maxSanity) * 100));
+    this.hpFill.style.strokeDasharray = `${hpPct} 100`;
+    this.sanFill.style.strokeDasharray = `${sanPct} 100`;
     this.hpText.textContent = `${Math.ceil(hp)}`;
-    this.sanFill.style.width = `${Math.max(0, (sanity / maxSanity) * 100)}%`;
     this.sanText.textContent = `${Math.ceil(sanity)}`;
-    this.depthText.textContent = `深度 ${depth}`;
+    this.shieldText.textContent = `🛡 ${shieldCount}/${Math.max(0, maxShieldCount)}`;
+    this.depthText.textContent = `${depth}`;
     this.stateText.textContent = stateLabel;
     this.bagBtnVal.textContent = `${bagValue}`;
 
@@ -3116,32 +4226,8 @@ class HUD {
 
     // 底部消耗品余量（来自背包库存）
     if (this.bag) {
-      this.setConCount(this.nadeBtn, this.bag.countKind('grenade'));
-      // 物品栏：根据生命/神智百分比，优先显示最需要的消耗品
-      const meds = (Object.keys(CONSUMABLE_INFO)                    )
-        .filter((k) => k !== 'grenade' && this.bag .countKind(k) > 0);
-      let pick                        = null;
-      if (meds.length > 0) {
-        const needHp = (hp / maxHp) <= (sanity / maxSanity);
-        const prefer = meds.filter((k) => needHp ? CONSUMABLE_INFO[k].hp > 0 : CONSUMABLE_INFO[k].san > 0);
-        const pool = prefer.length ? prefer : meds;
-        pool.sort((a, b) => needHp
-          ? CONSUMABLE_INFO[b].hp - CONSUMABLE_INFO[a].hp
-          : CONSUMABLE_INFO[b].san - CONSUMABLE_INFO[a].san);
-        pick = pool[0];
-      }
-      this.mostNeededKind = pick;
-      const ic = this.itemBtn.querySelector('.a-icon')                      ;
-      const nn = this.itemBtn.querySelector('.a-n')                      ;
-      if (pick) {
-        if (ic) ic.textContent = CONSUMABLE_INFO[pick].icon;
-        if (nn) nn.textContent = `×${this.bag.countKind(pick)}`;
-        this.itemBtn.classList.remove('empty');
-      } else {
-        if (ic) ic.textContent = '🧪';
-        if (nn) nn.textContent = '×0';
-        this.itemBtn.classList.add('empty');
-      }
+      this.renderQuickSlot(0);
+      this.renderQuickSlot(1);
     }
 
     const cx = this.adsMode ? this.stage.clientWidth / 2 : mousePx.x;
@@ -3175,8 +4261,8 @@ class HUD {
     list.forEach((w, i) => {
       const btn = document.createElement('button');
       btn.className = 'wbtn';
-      btn.innerHTML = `<span class="w-icon">${w.icon}</span><span class="w-ammo"></span>`;
-      btn.title = w.name;
+      btn.innerHTML = `<span class="w-key">Q</span><span class="w-icon">${w.icon}</span><span class="w-ammo"></span>`;
+      btn.title = `${w.name}${list.length > 1 ? '（Q 切换）' : ''}`;
       btn.addEventListener('click', () => { if (this.onWeaponTap) this.onWeaponTap(i); });
       this.weaponSlotsEl.appendChild(btn);
       this.weaponBtns.push(btn);
@@ -3185,51 +4271,261 @@ class HUD {
   }
   setWeaponSelected(index        )       {
     this.selIndex = index;
-    this.weaponBtns.forEach((b, i) => b.classList.toggle('selected', i === index));
+    const canSwap = this.weaponBtns.length > 1;
+    this.weaponBtns.forEach((b, i) => {
+      b.classList.toggle('selected', i === index);
+      b.classList.toggle('swap-ready', canSwap && i !== index);
+    });
   }
   updateSkill(owned         , charges        )       {
     if (!owned) { this.skillBtn.style.display = 'none'; return; }
     this.skillBtn.style.display = 'flex';
     this.skillBtn.classList.toggle('empty', charges <= 0);
+    this.skillBtn.title = 'E：夜枭雷暴';
     const el = this.skillBtn.querySelector('.a-n')                      ;
     if (el) el.textContent = `×${charges}`;
   }
-  // 物品栏下拉：列出背包中所有消耗品（不含手雷），点击使用
+  // 物品栏下拉：列出背包中所有消耗品，支持点击选择槽位或拖到槽位。
           toggleItemDropdown()       {
     if (this.itemDropdown.classList.contains('open')) {
-      this.itemDropdown.classList.remove('open');
+      this.closeItemDropdown();
       return;
     }
+    this.closeQuickSlotMenu();
+    this.renderItemDropdown();
+    this.itemDropdown.classList.add('open');
+  }
+
+          closeItemDropdown()       {
+    this.closeQuickSlotMenu();
+    this.itemDropdown.classList.remove('open');
+  }
+
+          renderItemDropdown()       {
     this.itemDropdown.innerHTML = '';
     const kinds = (Object.keys(CONSUMABLE_INFO)                    )
-      .filter((k) => k !== 'grenade' && this.bag !== null && this.bag.countKind(k) > 0);
+      .filter((k) => this.bag !== null && this.bag.countKind(k) > 0);
     if (kinds.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'item-row';
-      empty.textContent = '（无消耗品）';
+      empty.textContent = '（无可用道具）';
       this.itemDropdown.appendChild(empty);
     }
     for (const k of kinds) {
       const info = CONSUMABLE_INFO[k];
       const row = document.createElement('div');
       row.className = 'item-row';
-      row.innerHTML = `<span class="ir-icon">${info.icon}</span><span>${info.name}<span class="ir-desc"> ${info.desc}</span></span><span class="ir-n">×${this.bag .countKind(k)}</span>`;
-      row.addEventListener('click', () => {
-        this.itemDropdown.classList.remove('open');
-        if (this.onUseConsumable) this.onUseConsumable(k);
+      row.draggable = true;
+      row.dataset.kind = k;
+      row.innerHTML =
+        `<span class="ir-icon">${info.icon}</span>` +
+        `<span>${info.name}<span class="ir-desc"> ${info.desc}</span></span>` +
+        `<span class="ir-n">×${this.bag .countKind(k)}</span>`;
+      row.addEventListener('dragstart', (e) => {
+        e.dataTransfer?.setData('application/x-consumable', k);
+        e.dataTransfer?.setData('text/plain', k);
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy';
+        row.classList.add('dragging');
+      });
+      row.addEventListener('dragend', () => row.classList.remove('dragging'));
+      row.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.closeQuickSlotMenu();
+        if (this.onUseConsumable) {
+          this.onUseConsumable(k);
+          this.renderQuickSlot(0);
+          this.renderQuickSlot(1);
+          this.renderItemDropdown();
+        }
       });
       this.itemDropdown.appendChild(row);
     }
-    this.itemDropdown.classList.add('open');
   }
 
-          setConCount(btn             , n        )       {
+  getQuickConsumable(slot        )                 {
+    return this.quickSlots[slot] || QUICK_SLOT_DEFAULTS[slot] || 'med';
+  }
+
+          loadQuickSlots()                   {
+    try {
+      const raw = localStorage.getItem(QUICK_SLOT_KEY);
+      if (!raw) return QUICK_SLOT_DEFAULTS.slice();
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return QUICK_SLOT_DEFAULTS.slice();
+      const loaded = [0, 1].map((slot) => {
+        const value = parsed[slot];
+        return this.isConsumableKind(value) ? value : QUICK_SLOT_DEFAULTS[slot];
+      });
+      return this.normalizeQuickSlots(loaded);
+    } catch (e) {
+      return QUICK_SLOT_DEFAULTS.slice();
+    }
+  }
+
+          normalizeQuickSlots(slots                  )                   {
+    const normalized = [slots[0] || QUICK_SLOT_DEFAULTS[0], slots[1] || QUICK_SLOT_DEFAULTS[1]];
+    if (normalized[0] === normalized[1]) {
+      const fallback = QUICK_SLOT_DEFAULTS.find((kind) => kind !== normalized[0]) ||
+        (Object.keys(CONSUMABLE_INFO)                    ).find((kind) => kind !== normalized[0]);
+      if (fallback) normalized[1] = fallback;
+    }
+    return normalized;
+  }
+
+          saveQuickSlots()       {
+    try {
+      localStorage.setItem(QUICK_SLOT_KEY, JSON.stringify(this.quickSlots.slice(0, 2)));
+    } catch (e) { /* ignore */ }
+  }
+
+          useQuickSlot(slot        )       {
+    if (this.onUseConsumable) this.onUseConsumable(this.getQuickConsumable(slot));
+  }
+
+          renderQuickSlot(slot        )       {
+    const btn = slot === 0 ? this.nadeBtn : this.itemBtn;
+    const kind = this.getQuickConsumable(slot);
+    const info = CONSUMABLE_INFO[kind];
+    const icon = btn.querySelector('.a-icon')                      ;
+    const count = btn.querySelector('.a-n')                      ;
+    const n = this.bag ? this.bag.countKind(kind) : 0;
+    if (icon) icon.textContent = info.icon;
+    if (count) count.textContent = `×${n}`;
     btn.classList.toggle('empty', n <= 0);
-    const el = btn.querySelector('.a-n')                      ;
-    if (el) el.textContent = `×${n}`;
+    btn.title = `${slot + 1}: ${info.name}`;
+  }
+
+          assignQuickSlot(slot        , kind                )       {
+    const otherSlot = slot === 0 ? 1 : 0;
+    const previous = this.getQuickConsumable(slot);
+    const swapped = this.quickSlots[otherSlot] === kind && previous !== kind;
+    this.quickSlots[slot] = kind;
+    if (swapped) this.quickSlots[otherSlot] = previous;
+    this.quickSlots = this.normalizeQuickSlots(this.quickSlots);
+    this.saveQuickSlots();
+    this.renderQuickSlot(slot);
+    this.renderQuickSlot(otherSlot);
+    this.closeItemDropdown();
+    this.showToast(swapped
+      ? `${CONSUMABLE_INFO[kind].icon} 已与槽位 ${otherSlot + 1} 交换`
+      : `${CONSUMABLE_INFO[kind].icon} 已绑定到槽位 ${slot + 1}`);
+  }
+
+          showQuickSlotMenu(row             , kind                )       {
+    this.closeQuickSlotMenu();
+    row.classList.add('selecting');
+    const menu = document.createElement('div');
+    menu.className = 'item-slot-menu';
+    for (let slot = 0; slot < 2; slot++) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = `放到槽位 ${slot + 1}`;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.assignQuickSlot(slot, kind);
+      });
+      menu.appendChild(btn);
+    }
+    row.appendChild(menu);
+    this.quickSlotMenu = menu;
+  }
+
+          closeQuickSlotMenu()       {
+    if (!this.quickSlotMenu) return;
+    const row = this.quickSlotMenu.parentElement;
+    if (row) row.classList.remove('selecting');
+    this.quickSlotMenu.remove();
+    this.quickSlotMenu = null;
+  }
+
+          wireQuickSlotDrop(btn             , slot        )       {
+    btn.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      btn.classList.add('drop-ok');
+    });
+    btn.addEventListener('dragleave', () => btn.classList.remove('drop-ok'));
+    btn.addEventListener('drop', (e) => {
+      e.preventDefault();
+      btn.classList.remove('drop-ok');
+      const kind = e.dataTransfer?.getData('application/x-consumable') || e.dataTransfer?.getData('text/plain') || '';
+      if (this.isConsumableKind(kind)) this.assignQuickSlot(slot, kind);
+    });
+  }
+
+          isConsumableKind(value        )                          {
+    return CONSUMABLE_INFO[value                  ] !== undefined;
   }
 
   // ===== 网格背包 =====
+          onBagKeyDown(e               )       {
+    if (e.code !== 'KeyB' || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+    const target = e.target                      ;
+    if (target && (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.tagName === 'SELECT' ||
+      target.isContentEditable
+    )) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (this.bagOverlay.style.display === 'flex') {
+      this.closeBag();
+      return;
+    }
+    if (this.isOverlayVisible('start-overlay') || this.isOverlayVisible('end-overlay') ||
+      this.isOverlayVisible('bagfull-overlay') || this.isOverlayVisible('choice-overlay') ||
+      this.isOverlayVisible('extract-overlay') || this.isOverlayVisible('intel-overlay') ||
+      this.isOverlayVisible('shop-overlay') || this.isOverlayVisible('pause-overlay')) {
+      return;
+    }
+    if (this.routeMapExpanded) this.collapseRouteMap(true);
+    this.openBag();
+  }
+
+          onItemExpandKeyDown(e               )       {
+    if (e.key === 'Escape' && this.itemDropdown.classList.contains('open')) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.closeItemDropdown();
+      return;
+    }
+    if (e.code !== 'Tab' || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+    const target = e.target                      ;
+    if (target && (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.tagName === 'SELECT' ||
+      target.isContentEditable
+    )) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (this.isOverlayVisible('start-overlay') || this.isOverlayVisible('end-overlay') ||
+      this.isOverlayVisible('bagfull-overlay') || this.isOverlayVisible('choice-overlay') ||
+      this.isOverlayVisible('extract-overlay') || this.isOverlayVisible('intel-overlay') ||
+      this.isOverlayVisible('shop-overlay') || this.isOverlayVisible('pause-overlay') ||
+      this.bagOverlay.style.display === 'flex' || this.routeMapExpanded) {
+      return;
+    }
+    this.toggleItemDropdown();
+  }
+
+          onItemDropdownOutsidePointer(e              )       {
+    if (!this.itemDropdown.classList.contains('open')) return;
+    const target = e.target                      ;
+    if (target && (this.itemDropdown.contains(target) || this.itemExpand.contains(target))) return;
+    this.closeItemDropdown();
+  }
+
+          isOverlayVisible(id        )          {
+    const el = document.getElementById(id);
+    return !!el && getComputedStyle(el).display !== 'none';
+  }
+
           openBag()       {
     this.bagOverlay.style.display = 'flex';
     if (this.onBagToggle) this.onBagToggle(true);
@@ -3437,10 +4733,12 @@ class HUD {
   // ===== BOSS血条 =====
   showBossBar(name        )       {
     this.bossName.textContent = name;
+    this.bossFill.style.width = '100%';
     this.bossBar.style.display = 'block';
   }
   updateBossBar(hp        , maxHp        , phase        )       {
-    this.bossFill.style.width = `${Math.max(0, (hp / maxHp) * 100)}%`;
+    const pct = maxHp > 0 ? Math.max(0, Math.min(100, (hp / maxHp) * 100)) : 0;
+    this.bossFill.style.width = `${pct}%`;
     this.bossName.textContent = this.bossName.textContent .split(' ·')[0] + (phase === 2 ? ' · 暴怒' : '');
   }
   hideBossBar()       { this.bossBar.style.display = 'none'; }
@@ -3452,6 +4750,11 @@ class HUD {
 
   setAds(on         )       { this.adsMode = on; }
 
+  setRoomTransition(alpha        , visible         )       {
+    this.roomTransition.style.display = visible ? 'block' : 'none';
+    this.roomTransition.style.opacity = `${Math.max(0, Math.min(1, alpha))}`;
+  }
+
   showHitmarker(headshot         )       {
     this.hitmarker.style.opacity = '1';
     this.hitmarker.style.color = headshot ? '#ff5c5c' : '#ffffff';
@@ -3462,6 +4765,10 @@ class HUD {
   setPrompt(text               )       {
     if (text) { this.promptEl.textContent = text; this.promptEl.style.opacity = '1'; }
     else this.promptEl.style.opacity = '0';
+  }
+
+  setStateLabel(text        )       {
+    this.stateText.textContent = text;
   }
 
   showToast(text        )       {
@@ -3503,24 +4810,288 @@ class HUD {
   }
   hideSearchPanel()       { this.searchPanel.style.display = 'none'; }
 
-  showChoice(options            , depth         = 0, sanityReduce         = 0)       {
+  dismissBlockingOverlays()       {
+    this.choiceOverlay.style.display = 'none';
+    this.extractOverlay.style.display = 'none';
+    this.intelOverlay.style.display = 'none';
+    this.shopOverlay.style.display = 'none';
+    this.bagOverlay.style.display = 'none';
+    document.getElementById('pause-overlay') .style.display = 'none';
+    document.getElementById('bagfull-overlay') .style.display = 'none';
+  }
+
+  renderRouteMap(snapshot                  )       {
+    this.routeSnapshot = snapshot;
+    this.drawRouteMap(snapshot);
+  }
+
+  showRouteChoice(snapshot                  )       {
+    this.routeSnapshot = snapshot;
+    this.routeChoiceMode = true;
+    this.routeDebugMode = false;
+    this.setRouteMapExpanded(true, true);
+  }
+
+  setRouteChoiceReady(snapshot                  )       {
+    this.routeSnapshot = snapshot;
+    this.routeChoiceMode = true;
+    this.routeDebugMode = false;
+    this.drawRouteMap(snapshot);
+  }
+
+  closeRouteMap()       {
+    this.routeDebugMode = false;
+    this.collapseRouteMap(false);
+  }
+
+  setRouteDebugMode(enabled         , snapshot                  )       {
+    this.routeSnapshot = snapshot;
+    this.routeDebugMode = enabled;
+    if (enabled) {
+      this.setRouteMapExpanded(true, true);
+    } else {
+      this.collapseRouteMap(true);
+    }
+  }
+
+          collapseRouteMap(preserveChoiceMode          = true)       {
+    if (!preserveChoiceMode) {
+      this.routeChoiceMode = false;
+    }
+    this.routeDebugMode = false;
+    this.setRouteMapExpanded(false, true);
+  }
+
+          onRouteMapOutsidePointer(e              )       {
+    if (!this.routeMapExpanded) return;
+    const target = e.target;
+    if (target instanceof Node && this.routeMap.contains(target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.collapseRouteMap(true);
+  }
+
+          onRouteMapKeyDown(e               )       {
+    if (!this.routeMapExpanded || e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.collapseRouteMap(true);
+  }
+
+          onRouteMapDragStart(e              )       {
+    if (!this.routeMapExpanded) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const target = e.target                      ;
+    const viewport = target?.closest('.route-canvas')                      ;
+    if (!viewport) return;
+
+    this.routeMapDragViewport = viewport;
+    this.routeMapDragPointerId = e.pointerId;
+    this.routeMapDragStartX = e.clientX;
+    this.routeMapDragStartY = e.clientY;
+    this.routeMapDragStartScrollTop = viewport.scrollTop;
+    this.routeMapDragMoved = false;
+  }
+
+          onRouteMapDragMove(e              )       {
+    const viewport = this.routeMapDragViewport;
+    if (!viewport || e.pointerId !== this.routeMapDragPointerId) return;
+    const dx = e.clientX - this.routeMapDragStartX;
+    const dy = e.clientY - this.routeMapDragStartY;
+    if (Math.hypot(dx, dy) <= 4) return;
+
+    if (!this.routeMapDragMoved) {
+      viewport.classList.add('dragging');
+    }
+    this.routeMapDragMoved = true;
+    viewport.scrollTop = this.routeMapDragStartScrollTop - dy;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+          onRouteMapDragEnd(e              )       {
+    const viewport = this.routeMapDragViewport;
+    if (!viewport || e.pointerId !== this.routeMapDragPointerId) return;
+    viewport.classList.remove('dragging');
+
+    const dragged = this.routeMapDragMoved;
+    this.routeMapDragViewport = null;
+    this.routeMapDragPointerId = -1;
+    this.routeMapDragMoved = false;
+    if (dragged) {
+      this.routeMapSuppressClickUntil = performance.now() + 160;
+    }
+  }
+
+          onRouteMapClick(e            )       {
+    if (performance.now() <= this.routeMapSuppressClickUntil) {
+      this.routeMapSuppressClickUntil = 0;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    const target = e.target               ;
+    const nodeEl = target.closest('.route-node.selectable')                      ;
+    if (nodeEl && this.routeSnapshot) {
+      e.stopPropagation();
+      const id = nodeEl.dataset.routeId;
+      const node = this.routeSnapshot.nodes.find((n) => n.id === id);
+      if (!node) return;
+      this.closeRouteMap();
+      if (this.onChoice) this.onChoice(node);
+      return;
+    }
+    if (target.closest('.route-map-toggle')) {
+      e.stopPropagation();
+      this.setRouteMapExpanded(!this.routeMapExpanded);
+      return;
+    }
+    if (target.closest('.route-map-close')) {
+      e.stopPropagation();
+      this.collapseRouteMap(true);
+    }
+  }
+
+          setRouteMapExpanded(open         , force          = false)       {
+    if (this.routeMapExpanded === open && !force) return;
+    this.routeMapExpanded = open;
+    this.stage.classList.toggle('route-map-open', open);
+    if (this.onRouteMapToggle) this.onRouteMapToggle(open);
+    if (this.routeSnapshot) this.drawRouteMap(this.routeSnapshot);
+    if (open) this.centerRouteMapSoon();
+  }
+
+          centerRouteMapSoon()       {
+    requestAnimationFrame(() => this.centerRouteMapOnProgress());
+  }
+
+          centerRouteMapOnProgress()       {
+    const viewport = this.routeMap.querySelector('.route-canvas')                      ;
+    if (!viewport) return;
+    const target =
+      this.routeMap.querySelector('.route-node.current')                       ||
+      this.routeMap.querySelector('.route-node.selectable')                       ||
+      this.routeMap.querySelector('.route-node.next')                      ;
+    if (!target) {
+      viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      return;
+    }
+
+    const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    const desired = target.offsetTop - viewport.clientHeight * 0.58;
+    viewport.scrollTop = Math.max(0, Math.min(maxScroll, desired));
+  }
+
+          drawRouteMap(snapshot                  )       {
+    const nodes = snapshot.nodes;
+    if (nodes.length === 0) {
+      this.routeMap.innerHTML = '';
+      return;
+    }
+    const nodeById = new Map(nodes.map((n) => [n.id, n]));
+    const choiceIds = new Set(snapshot.choiceIds);
+    const current = snapshot.currentId ? nodeById.get(snapshot.currentId) || null : null;
+    const progressMax = Math.max(1, snapshot.segmentEndDepth - snapshot.segmentStartDepth);
+    const progress = current ? Math.max(0, Math.min(progressMax, current.depth - snapshot.segmentStartDepth)) : 0;
+    const laneX = (lane        )         => 16 + lane * 34;
+    const floorGap = 104;
+    const mapPaddingY = 72;
+    const routeContentHeight = mapPaddingY * 2 + Math.max(1, snapshot.floors - 1) * floorGap;
+    const floorY = (floor        )         => routeContentHeight - mapPaddingY - (floor - 1) * floorGap;
+
+    const lines           = [];
+    for (const node of nodes) {
+      const x1 = laneX(node.lane);
+      const y1 = floorY(node.floor);
+      for (const id of node.links) {
+        const target = nodeById.get(id);
+        if (!target) continue;
+        const x2 = laneX(target.lane);
+        const y2 = floorY(target.floor);
+        const active = node.visited && (target.visited || choiceIds.has(target.id));
+        lines.push(`<line class="route-line${active ? ' active' : ''}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`);
+      }
+    }
+
+    const nodeEls = nodes.map((node) => {
+      const info = ROOM_INFO[node.type];
+      const debugSelectable = this.routeDebugMode && snapshot.currentId !== node.id;
+      const selectable = this.routeMapExpanded && (
+        (this.routeChoiceMode && choiceIds.has(node.id)) ||
+        debugSelectable
+      );
+      const cls = [
+        'route-node',
+        `route-${node.type}`,
+        hasRoomArt(node.type) ? 'has-art' : '',
+        node.visited ? 'visited' : '',
+        snapshot.currentId === node.id ? 'current' : '',
+        choiceIds.has(node.id) ? 'next' : '',
+        debugSelectable ? 'debug-selectable' : '',
+        selectable ? 'selectable' : '',
+      ].filter(Boolean).join(' ');
+      const x = laneX(node.lane);
+      const y = floorY(node.floor);
+      const icon = roomArtHtml(node.type, info.icon, 'route-node-art');
+      const showLabel = snapshot.currentId === node.id || choiceIds.has(node.id) || debugSelectable;
+      const label = showLabel ? `<span class="route-node-label">${ROOM_LABEL[node.type] || info.name}</span>` : '';
+      if (selectable) {
+        return `<button type="button" class="${cls}" data-route-id="${node.id}" data-floor="${node.floor}" style="left:${x}%; top:${y}px">${icon}${label}</button>`;
+      }
+      return `<div class="${cls}" data-floor="${node.floor}" style="left:${x}%; top:${y}px">${icon}${label}</div>`;
+    }).join('');
+
+    this.routeMap.classList.toggle('route-expanded', this.routeMapExpanded);
+    this.routeMap.classList.toggle('route-collapsed', !this.routeMapExpanded);
+
+    if (!this.routeMapExpanded) {
+      this.routeMap.innerHTML =
+        `<button class="route-map-toggle route-icon-btn">` +
+        `<span class="route-icon">🗺️</span><span class="route-progress">${progress}/${progressMax}</span>` +
+        `</button>`;
+      return;
+    }
+
+    this.routeMap.innerHTML =
+      `<div class="route-head">` +
+      `<strong>${this.routeDebugMode ? 'DEBUG 选关' : this.routeChoiceMode ? '选择下一关' : '路线图'}</strong><span>${progress}/${progressMax}</span>` +
+      (this.routeDebugMode
+        ? `<span class="route-debug-badge">任意节点</span><button class="route-map-close">×</button>`
+        : this.routeChoiceMode ? `<span class="route-must-pick">点击高亮节点</span>` : `<button class="route-map-close">×</button>`) +
+      `</div>` +
+      `<div class="route-canvas">` +
+      `<div class="route-map-content" style="height:${routeContentHeight}px">` +
+      `<svg viewBox="0 0 100 ${routeContentHeight}" preserveAspectRatio="none">${lines.join('')}</svg>${nodeEls}` +
+      `</div>` +
+      `</div>`;
+    this.centerRouteMapSoon();
+  }
+
+  showChoice(options             , depth         = 0, sanityReduce         = 0)       {
     const titleEl = document.getElementById('choice-title');
     const subEl = document.getElementById('choice-sub');
-    if (titleEl) titleEl.textContent = '选择路线';
-    if (subEl) subEl.textContent = '前方房间，选择其一';
+    if (titleEl) titleEl.textContent = '选择地图节点';
+    if (subEl) subEl.textContent = '路线会影响风险、补给和最终收益';
     this.choiceCards.innerHTML = '';
-    for (const t of options) {
-      const info = ROOM_INFO[t];
-      const cost = Math.max(0, sanityCostFor(t, depth) - sanityReduce);
+    for (const node of options) {
+      const info = ROOM_INFO[node.type];
+      const costDepth = node.depth || depth;
+      const cost = Math.max(0, sanityCostFor(node.type, costDepth) - sanityReduce);
       const costLine = cost > 0
         ? `<em style="color:#7d9bff">🧠 神智 -${cost}</em>`
         : `<em style="color:#7CFFB0">无神智消耗</em>`;
       const card = document.createElement('button');
       card.className = 'door-card';
-      card.innerHTML = `<span class="door-icon">${info.icon}</span><strong>${info.name}</strong><em>${info.hint}</em>${costLine}`;
+      const iconClass = hasRoomArt(node.type) ? 'door-icon has-art' : 'door-icon';
+      card.innerHTML =
+        `<span class="${iconClass}">${roomArtHtml(node.type, info.icon, 'door-icon-art')}</span><strong>${info.name}</strong>` +
+        `<em>第 ${node.floor}/10 节 · 路线 ${node.lane + 1}</em>` +
+        `<em style="color:#ffcf7a">风险：${node.risk}</em>` +
+        `<em style="color:#7CFFB0">收益：${node.reward}</em>` +
+        `<em>${info.hint}</em>${costLine}`;
       card.addEventListener('click', () => {
         this.choiceOverlay.style.display = 'none';
-        if (this.onChoice) this.onChoice(t);
+        if (this.onChoice) this.onChoice(node);
       });
       this.choiceCards.appendChild(card);
     }
@@ -3657,13 +5228,14 @@ class HUD {
 
 // ===== game.ts =====
 
-                                                                                                                
+                                                                                                                         
 
 const STATE_LABEL                         = {
   moving: '▶ 前进中…',
   combat: '⚔ 战斗！消灭所有敌人',
   search: '🔍 搜索中（点击箱子）',
-  choice: '🚪 选择房间',
+  loot: '💰 拾取掉落',
+  choice: '🗺 选择路线',
   extract: '🟢 撤离点',
   intel: '📋 情报',
   interact: '✋ 点击交互',
@@ -3681,6 +5253,20 @@ const KIND_NAMES                         = {
                           
                
                 
+ 
+
+                  
+                                                                 
+                                                          
+
+                       
+                    
+               
+               
+               
+                
+                 
+                                  
  
 
 class Game {
@@ -3703,12 +5289,20 @@ class Game {
           pistolDef            ;     // 默认武器（无装备时兜底）
           paused          = false;   // 打开背包时暂停
           userPaused          = false; // 暂停按钮
+          routePaused          = false; // 展开路线图时暂停
+          debugRouteMode          = false; // 调试选关：~ 开关，地图任意节点可进入
+          transitioning          = false;
+          transitionNode                   = null;
+          transitionDebugJump          = false;
+          transitionTimer         = 0;
+                   transitionHold         = 0.08;
+                   transitionFadeOut         = 0.32;
 
           state            = 'moving';
           currentRoom              = null;
           enteredDepth        ;
           triggeredDepth        ;
-          pendingChoice                    = null;
+          pendingRoomStart              = null;
           kills         = 0;
           searchTarget                    = null;
           searchProgress         = 0;
@@ -3716,6 +5310,7 @@ class Game {
           enemyShots              = [];
           explosions                                      = [];
           lootOrbs                                                    = [];  // 击杀掉落金币光点
+          pendingRouteMessage                = null;
           lockedZombie                = null;  // 锁定的索敌目标
           wasManualAim          = false;        // 上一帧是否在手动瞄准（检测进入瞄准的边沿）
           sanityReduce         = 0;   // 头脑冷静：进房理智消耗减免（最多3）
@@ -3723,6 +5318,7 @@ class Game {
           adrenalineRooms         = 0; // 肾上腺素剩余衰减房间数
           shownChapterIntro         = -1;
           lootValueMult         = 1;       // V5 契约：撤离结算价值加成
+          assistantDamageMult         = 1; // 夜枭祝福：宠物伤害倍率
           activePacts           = [];      // V5 已结契约
 
   constructor(canvas                   , meta      , audio         , startDepth        ) {
@@ -3764,6 +5360,8 @@ class Game {
     this.zombies = new ZombieManager(this.scene);
     this.zombies.onRangedShoot = (origin               ) => this.spawnEnemyShot(origin);
 
+    const nonPistolReloadMult = meta.data.reloadLv > 0 ? RELOAD_TRAINING_MULT : 1;
+
     // 武器定义（占格：手枪 1×2，AK/霰弹 2×2）
     const pistol            = {
       name: '手枪', icon: '🔫',
@@ -3777,7 +5375,7 @@ class Game {
       name: 'AK', icon: 'AK',
       damage: 9 + meta.data.pistolDmgLv,
       magSize: 30 + meta.data.magLv * 4,
-      reloadTime: 2.1, fireInterval: 0.09, pellets: 1, spread: 0,
+      reloadTime: 2.1 * nonPistolReloadMult, fireInterval: 0.09, pellets: 1, spread: 0,
       cellsW: 2, cellsH: 2, ammoType: 'rifle',
     };
     // 初始：手枪、AK 直接装入两个武器栏
@@ -3792,7 +5390,7 @@ class Game {
         name: '霰弹枪', icon: '💥',
         damage: 6 + meta.data.pistolDmgLv,
         magSize: 5 + meta.data.magLv,
-        reloadTime: 1.8, fireInterval: 0.8, pellets: 6, spread: 0.05,
+        reloadTime: 1.8 * nonPistolReloadMult, fireInterval: 0.8, pellets: 6, spread: 0.05,
         cellsW: 2, cellsH: 2, ammoType: 'shell',
       }));
     }
@@ -3802,6 +5400,11 @@ class Game {
     this.bag.addBulletsOf('rifle', 30);   // 手枪弹无限，不再发放手枪弹
 
     this.player = new PlayerRig(this.scene, this.camera, this.bag.equippedWeaponDefs());
+    this.player.maxHp += meta.data.hpLv * HP_TRAINING_STEP;
+    this.player.hp = this.player.maxHp;
+    this.player.maxSanity += meta.data.sanityLv * SANITY_TRAINING_STEP;
+    this.player.sanity = this.player.maxSanity;
+    this.player.configureShieldSlots(2 + meta.data.shieldCapLv, true);
 
     if (meta.data.assistantOwned) {
       this.assistant = new Assistant(this.scene);
@@ -3825,16 +5428,24 @@ class Game {
     this.hud.onUseConsumableItem = (k) => this.useConsumable(k);
     this.hud.onUseSkill = () => this.useSkill();
     this.hud.onInventoryDirty = () => this.syncEquipment();
-    this.hud.onBagToggle = (open) => { this.paused = open; };
-    this.hud.onPauseToggle = (p) => { this.userPaused = p; };
+    this.hud.onBagToggle = (open) => {
+      this.paused = open;
+    };
+    this.hud.onPauseToggle = (p) => {
+      this.userPaused = p;
+      this.syncMusicPause();
+    };
+    this.hud.onRouteMapToggle = (open) => {
+      this.routePaused = open;
+      this.wasManualAim = false;
+      this.input.cancelPointer();
+    };
     this.hud.onSensitivity = (v) => { this.player.aimSensitivity = v; };
 
-    this.hud.onSkipSearch = () => this.finishSearch();
-    this.hud.onChoice = (t          ) => {
-      this.pendingChoice = null;
-      this.dungeon.append(t);
-      this.audio.doorOpen();
-      this.state = 'moving';
+    this.hud.onChoice = (node           ) => {
+      const debugJump = this.debugRouteMode;
+      this.debugRouteMode = false;
+      this.beginRouteTransition(node, debugJump);
     };
     this.hud.onExtract = (leave         ) => {
       if (leave) {
@@ -3844,11 +5455,17 @@ class Game {
       }
     };
     this.hud.onIntelContinue = () => {
-      this.state = 'moving';
+      if (this.pendingRoomStart) {
+        const room = this.pendingRoomStart;
+        this.pendingRoomStart = null;
+        this.onRoomCenter(room);
+      } else {
+        this.openRouteChoice();
+      }
     };
 
-    this.dungeon.append('corridor'            );  // 起始空走廊（无怪/无交互）
-    this.appendNext();
+    this.prepareRouteChoices();
+    this.refreshRouteMap();
     this.meta.data.runs += 1;
     this.meta.save();
 
@@ -3866,20 +5483,175 @@ class Game {
     this.renderer.setAnimationLoop(() => this.tick());
   }
 
-          appendNext()       {
-    const options = this.dungeon.nextOptions();
-    if (options.length === 1) {
-      this.dungeon.append(options[0]);
+          syncMusicPause()       {
+    // 只把明确的暂停菜单视为音乐暂停。路线图/背包会冻结模拟，但仍属于游戏流程。
+    if (this.userPaused) {
+      this.audio.pauseAmbient();
     } else {
-      this.pendingChoice = options;
+      this.audio.resumeAmbient();
     }
   }
 
-          roomAt(z        )              {
-    for (const r of this.dungeon.rooms) {
-      if (z <= r.zEntry && z > r.zExit) return r;
+          prepareRouteChoices()       {
+    this.dungeon.nextChoices();
+    this.refreshRouteMap();
+  }
+
+          refreshRouteMap()       {
+    this.hud.renderRouteMap(this.dungeon.routeSnapshot());
+  }
+
+          openRouteChoice(message         )       {
+    this.prepareRouteChoices();
+    this.state = 'choice';
+    this.hud.setStateLabel(STATE_LABEL.choice);
+    this.hud.setPrompt(null);
+    if (message) this.hud.showToast(message);
+    this.hud.showRouteChoice(this.dungeon.routeSnapshot());
+  }
+
+          enableRouteChoiceFromMap()       {
+    this.dungeon.nextChoices();
+    this.hud.setRouteChoiceReady(this.dungeon.routeSnapshot());
+  }
+
+          startRouteNode(node           , debugJump          = false)       {
+    this.paused = false;
+    this.userPaused = false;
+    this.routePaused = false;
+    this.syncMusicPause();
+    this.pendingRouteMessage = null;
+    this.searchTarget = null;
+    this.searchProgress = 0;
+    this.hud.dismissBlockingOverlays();
+    this.clearTransientObjects();
+    const room = this.dungeon.appendRouteNode(node, debugJump);
+    this.refreshRouteMap();
+    this.currentRoom = room;
+    this.enteredDepth = room.depth - 1;
+    this.triggeredDepth = room.depth - 1;
+    this.player.teleportTo(new THREE.Vector3(0, 0, room.zEntry - 6));
+    this.hud.setPrompt(null);
+    this.hud.hideSearchPanel();
+    this.hud.hideSearchRing();
+    this.audio.doorOpen();
+    this.recoverAssistantSkillCharge();
+    if (debugJump) this.hud.showToast(`DEBUG 跳转：${ROOM_INFO[node.type].name}`);
+    this.state = 'moving';
+    if (!this.onEnterRoom(room)) {
+      this.pendingRoomStart = room;
+      this.hud.setStateLabel(STATE_LABEL[this.state]);
+      return;
     }
-    return null;
+    this.onRoomCenter(room);
+    this.hud.setStateLabel(STATE_LABEL[this.state]);
+  }
+
+          recoverAssistantSkillCharge()       {
+    if (!this.assistant) return;
+    const gained = this.assistant.recoverCharge(1);
+    if (gained > 0) this.hud.updateSkill(true, this.assistant.charges);
+  }
+
+          beginRouteTransition(node           , debugJump          = false)       {
+    if (this.transitioning) return;
+    this.paused = false;
+    this.userPaused = false;
+    this.routePaused = false;
+    this.syncMusicPause();
+    this.wasManualAim = false;
+    this.input.cancelPointer();
+    this.hud.closeRouteMap();
+    this.hud.dismissBlockingOverlays();
+    this.hud.setPrompt(null);
+    this.transitioning = true;
+    this.transitionNode = node;
+    this.transitionDebugJump = debugJump;
+    this.transitionTimer = 0;
+    this.hud.setRoomTransition(1, true);
+    this.startRouteNode(node, debugJump);
+  }
+
+          updateRouteTransition(dt        )       {
+    this.transitionTimer += dt;
+    const fadeOutAt = this.transitionHold;
+    const total = fadeOutAt + this.transitionFadeOut;
+
+    let alpha = 0;
+    if (this.transitionTimer < fadeOutAt) {
+      alpha = 1;
+    } else {
+      alpha = 1 - (this.transitionTimer - fadeOutAt) / this.transitionFadeOut;
+    }
+
+    if (this.transitionTimer >= total) {
+      this.transitioning = false;
+      this.transitionNode = null;
+      this.transitionDebugJump = false;
+      this.hud.setRoomTransition(0, false);
+      return;
+    }
+
+    this.hud.setRoomTransition(Math.max(0, Math.min(1, alpha)), true);
+  }
+
+          completeNode(message         )       {
+    if (this.state === 'over' || this.state === 'extract') return;
+    this.searchTarget = null;
+    this.hud.hideSearchPanel();
+    this.hud.hideSearchRing();
+    this.hud.setPrompt(null);
+    if (this.lootOrbs.length > 0) {
+      this.pendingRouteMessage = message || '打开地图选择下一关';
+      this.state = 'loot';
+      this.enableRouteChoiceFromMap();
+      this.hud.setStateLabel(STATE_LABEL.loot);
+      this.hud.setPrompt('点击场景内金币光点拾取掉落；也可打开地图直接前往下一关');
+      this.hud.showToast('还有怪物掉落物未拾取');
+      return;
+    }
+    this.openRouteChoice(message);
+  }
+
+          clearTransientObjects()       {
+    if (this.boss) {
+      this.boss.dispose(this.scene);
+      this.boss = null;
+      this.hud.hideBossBar();
+    }
+    for (const s of this.enemyShots) {
+      this.scene.remove(s.mesh);
+      (s.mesh.material                  ).dispose();
+      s.mesh.geometry.dispose();
+    }
+    this.enemyShots = [];
+    for (const t of this.tracers) {
+      this.scene.remove(t.mesh);
+      (t.mesh.material                  ).dispose();
+      t.mesh.geometry.dispose();
+    }
+    this.tracers = [];
+    for (const e of this.explosions) {
+      this.scene.remove(e.mesh);
+      (e.mesh.material                  ).dispose();
+      e.mesh.geometry.dispose();
+    }
+    this.explosions = [];
+    for (const o of this.lootOrbs) this.scene.remove(o.mesh);
+    this.lootOrbs = [];
+    for (const z of this.zombies.zombies) z.dispose(this.scene);
+    this.zombies.zombies = [];
+    this.lockedZombie = null;
+  }
+
+          toggleDebugRouteMode()       {
+    if (this.state === 'over') return;
+    this.debugRouteMode = !this.debugRouteMode;
+    const snapshot = this.dungeon.routeSnapshot();
+    this.hud.setRouteDebugMode(this.debugRouteMode, snapshot);
+    this.hud.showToast(this.debugRouteMode ? 'DEBUG 选关：点击任意节点' : 'DEBUG 关闭');
+    this.wasManualAim = false;
+    this.input.cancelPointer();
   }
 
   // V5：继续深入时提供高风险契约选择（搜打撤赌注）
@@ -3892,7 +5664,7 @@ class Game {
       } else {
         this.hud.showToast('继续深入……更危险，也更富有');
       }
-      this.state = 'moving';
+      this.openRouteChoice('继续深入……选择下一条路线');
     }, true, '🩸 深入契约', '强力增益+永久代价，可婉拒');
   }
 
@@ -3977,19 +5749,101 @@ class Game {
     this.hud.setupWeapons(list.map((w) => ({ icon: w.icon, name: w.name })), this.player.weaponIndex);
   }
 
-  // 助手·夜枭：群体电击（触屏按钮 / 键4 共用）
+  // 助手·夜枭：主动 AOE 电击（触屏按钮 / E 键共用）
           useSkill()       {
     if (!this.assistant) return;
-    const ok = this.assistant.zapAll(this.zombies.zombies, this.scene, this.audio, (z        ) => {
-      const result = z.takeDamage(25, 'body');
-      this.hud.floatText(z.mesh.position.clone().setY(1.4), `${result.dmg}`, 'dmg');
-      if (result.killed) this.onKill(z);
-    });
+    const dmg = this.assistantSkillDamage();
+    const ok = this.assistant.castAoe(this.assistantAoeTargets(dmg), this.scene, this.audio);
     if (ok) {
-      this.hud.showToast('🦉 夜枭·群体电击！');
+      this.hud.showToast(`🦉 夜枭·雷暴！范围伤害 ${dmg}`);
       this.hud.updateSkill(true, this.assistant.charges);
     } else if (this.assistant.charges <= 0) {
       this.hud.showToast('🦉 技能次数已用尽');
+    } else {
+      this.hud.showToast('🦉 范围内没有目标');
+    }
+  }
+
+          assistantAutoDamage()         {
+    return Math.round(Math.min(18, 8 + Math.floor(this.dungeon.currentDepth / 8)) * this.assistantDamageMult);
+  }
+
+          assistantSkillDamage()         {
+    return Math.round(Math.min(60, 32 + Math.floor(this.dungeon.currentDepth / 4)) * this.assistantDamageMult);
+  }
+
+          assistantAoeTargets(dmg        )                    {
+    const targets                    = [];
+    for (const z of this.zombies.zombies) {
+      if (z.dead) continue;
+      const pos = z.mesh.position.clone().setY(z.mesh.position.y + 1.1);
+      targets.push({
+        position: pos,
+        hit: () => {
+          const result = z.takeDamage(dmg, 'body');
+          this.hud.floatText(pos.clone(), `${result.dmg}`, 'dmg');
+          if (result.killed) this.onKill(z);
+        },
+      });
+    }
+    if (this.boss && !this.boss.dead) {
+      const pos = this.boss.mesh.position.clone().setY(this.boss.mesh.position.y + 3);
+      targets.push({
+        position: pos,
+        hit: () => {
+          const result = this.boss .takeDamage(dmg, 'body');
+          this.syncBossBar();
+          this.hud.floatText(pos.clone(), `${result.dmg}`, 'dmg');
+          if (result.killed) this.onBossKilled();
+        },
+      });
+    }
+    return targets;
+  }
+
+          updateAssistantAutoAttack()       {
+    if (!this.assistant || this.state !== 'combat' || !this.assistant.readyAutoAttack()) return;
+    let targetZombie                = null;
+    let targetBoss                  = null;
+    let targetPos                       = null;
+    let best = Infinity;
+    const origin = this.assistant.mesh.position;
+
+    for (const z of this.zombies.zombies) {
+      if (z.dead) continue;
+      const pos = z.mesh.position.clone().setY(z.mesh.position.y + 1.1);
+      const d = pos.distanceTo(origin);
+      if (d <= this.assistant.autoAttackRange && d < best) {
+        best = d;
+        targetZombie = z;
+        targetBoss = null;
+        targetPos = pos;
+      }
+    }
+
+    if (this.boss && !this.boss.dead) {
+      const pos = this.boss.mesh.position.clone().setY(this.boss.mesh.position.y + 3);
+      const d = pos.distanceTo(origin);
+      if (d <= this.assistant.autoAttackRange && d < best) {
+        best = d;
+        targetZombie = null;
+        targetBoss = this.boss;
+        targetPos = pos;
+      }
+    }
+
+    if (!targetPos) return;
+    const dmg = this.assistantAutoDamage();
+    this.assistant.fireAutoAttack(this.scene, this.audio, targetPos);
+    if (targetZombie) {
+      const result = targetZombie.takeDamage(dmg, 'body');
+      this.hud.floatText(targetPos.clone(), `${result.dmg}`, 'dmg');
+      if (result.killed) this.onKill(targetZombie);
+    } else if (targetBoss) {
+      const result = targetBoss.takeDamage(dmg, 'body');
+      this.syncBossBar();
+      this.hud.floatText(targetPos.clone(), `${result.dmg}`, 'dmg');
+      if (result.killed) this.onBossKilled();
     }
   }
 
@@ -4037,9 +5891,25 @@ class Game {
     }
     if (this.boss && !this.boss.dead && this.boss.mesh.position.distanceTo(point) < 5) {
       const result = this.boss.takeDamage(60, 'body');
+      this.syncBossBar();
       this.hud.floatText(this.boss.mesh.position.clone().setY(3), `${result.dmg}`, 'dmg');
       if (result.killed) this.onBossKilled();
     }
+  }
+
+          syncBossBar()       {
+    if (!this.boss) return;
+    this.hud.updateBossBar(this.boss.hp, this.boss.maxHp, this.boss.phase);
+  }
+
+          applyMonsterDamage(amount        )                                         {
+    const result = this.player.takeMonsterDamage(amount);
+    this.hud.floatText(
+      this.player.position.clone().setY(2.0),
+      result.shieldLost > 0 ? `🛡 -${result.shieldLost}` : `-${result.hpLost || Math.ceil(amount)}`,
+      result.shieldLost > 0 ? 'sanity' : 'head'
+    );
+    return result;
   }
 
           onKill(z        )       {
@@ -4098,7 +5968,15 @@ class Game {
     this.hud.logPickup('💰', '金币', orb.gold, '#ffd24d');
     this.scene.remove(orb.mesh);
     this.lootOrbs.splice(idx, 1);
+    this.maybeFinishPendingLoot();
     return true;
+  }
+
+          maybeFinishPendingLoot()       {
+    if (!this.pendingRouteMessage || this.lootOrbs.length > 0) return;
+    const message = this.pendingRouteMessage;
+    this.pendingRouteMessage = null;
+    this.completeNode(message);
   }
 
   // 点击祭坛/篝火交互（门口停下，点完再继续）
@@ -4151,10 +6029,10 @@ class Game {
     const cratesDone = room.crates.every((c) => c.userData.searched);
     const fireDone = room.pickups.every((p) => p.userData.taken);
     if (cratesDone && fireDone) {
-      this.finishSearch();
-      this.hud.showToast('🏕️ 休整完毕，前往下一房间');
+      this.completeNode('🏕️ 休整完毕，打开地图选择下一关');
     } else if (!fireDone) {
-      this.hud.setPrompt('补给已搜完，点击篝火休整后前进');
+      this.enableRouteChoiceFromMap();
+      this.hud.setPrompt('补给已搜完，可点击篝火休整；也可打开地图直接前往下一关');
     }
   }
 
@@ -4165,7 +6043,7 @@ class Game {
     this.hud.showPactChoice(curses, (p             ) => {
       if (p) this.applyBuff(p);
       else this.hud.showToast('你拒绝了祭坛的低语');
-      this.state = 'moving';
+      this.completeNode('祭坛低语散去，打开地图选择下一关');
     }, true, '😈 诅咒祭坛', '以代价换强力增益，或婉拒');
   }
 
@@ -4175,6 +6053,7 @@ class Game {
     // 头脑冷静最多 3 层，达上限后不再出现
     let pool = BLESSINGS.slice();
     if (this.sanityReduce >= 3) pool = pool.filter((b) => b.id !== 'bless_calm');
+    if (!this.assistant) pool = pool.filter((b) => b.id !== 'bless_owl_fury');
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -4185,7 +6064,7 @@ class Game {
         this.applyBuff(p);
         this.hud.showToast(`😇 祝福祭坛「${p.name}」：${p.boon}`);
       }
-      this.state = 'moving';
+      this.completeNode('祝福已生效，打开地图选择下一关');
     }, false, '😇 祝福祭坛', '三选一，获得纯增益');  // 不可婉拒，必选其一
   }
 
@@ -4201,8 +6080,9 @@ class Game {
       case 'bless_calm': this.sanityReduce = Math.min(3, this.sanityReduce + 1); break;
       case 'bless_reaper': this.reaperHeal = true; break;
       case 'bless_marksman': this.player.headshotMult += 0.10; break;
+      case 'bless_owl_fury': this.assistantDamageMult += 0.25; break;
       case 'curse_san': this.player.damageMult += 0.25; this.player.sanity = Math.max(0, this.player.sanity - 20); break;
-      case 'curse_hp': this.lootValueMult += 0.30; this.player.takeDamage(25); break;
+      case 'curse_hp': this.lootValueMult += 0.30; this.player.spendHp(25); break;
       case 'curse_sancap': this.player.dmgTakenMult = Math.max(0.5, this.player.dmgTakenMult - 0.15); this.player.maxSanity = Math.max(10, this.player.maxSanity - 15); break;
       case 'curse_hpcap': this.player.walkSpeed *= 1.25; this.player.maxHp = Math.max(20, this.player.maxHp - 20); break;
     }
@@ -4212,12 +6092,12 @@ class Game {
   }
 
   // ===== 商店（用局内金币结算）=====
-          shopItems                                                                                                                                           = [];
+          shopItems                = [];
 
           openShop()       {
     this.shopItems = this.rollShopItems();
     this.hud.onShopBuy = (i        ) => this.buyShopItem(i);
-    this.hud.onShopClose = () => { this.state = 'moving'; };
+    this.hud.onShopClose = () => { this.completeNode('离开商店，打开地图选择下一关'); };
     this.hud.onShopRefresh = () => this.refreshShop();
     this.hud.showShop(this.shopItems, this.bag.coins);
   }
@@ -4231,23 +6111,30 @@ class Game {
     this.hud.showShop(this.shopItems, this.bag.coins);
   }
 
-          rollShopItems()                                                                                                                                           {
+          rollShopItems()                {
     const bless = rollBlessing();
-    const pool                                                                                                                           = [
+    const shieldItem              = Math.random() < 0.68
+      ? { kind: 'shield', icon: '🛡️', name: '护盾电池', desc: '补充 1 格本局护盾', price: 75 }
+      : { kind: 'shieldBig', icon: '🛡️', name: '重型护盾包', desc: '补充 2 格本局护盾', price: 130 };
+    const pool                = [
       { kind: 'med', icon: '🩹', name: '医疗包', desc: '+35 生命（入包）', price: 60, payload: 'med' },
       { kind: 'sedative', icon: '💊', name: '镇静剂', desc: '+15 神智（入包）', price: 50, payload: 'sedative' },
+      { kind: 'honey', icon: '🍯', name: '野蜂蜜', desc: '生命+10 / 神智+15（入包）', price: 65, payload: 'honey' },
+      { kind: 'adren', icon: '💉', name: '肾上腺素', desc: '临时续航，3房后衰减（入包）', price: 110, payload: 'adren' },
+      { kind: 'osiris', icon: '🫙', name: '奥西里斯之脂', desc: '生命+35 / 神智-20（入包）', price: 85, payload: 'osiris' },
       { kind: 'grenade', icon: '💣', name: '手雷', desc: '范围爆炸（入包）', price: 70, payload: 'grenade' },
       { kind: 'ammoR', icon: '🔹', name: '步枪弹 ×60', desc: '补充步枪弹', price: 50 },
-      { kind: 'weapon', icon: '💥', name: '霰弹枪', desc: '近距高伤武器', price: 320,
-        payload: { name: '霰弹枪', icon: '💥', damage: 7, magSize: 6, reloadTime: 1.8, fireInterval: 0.8, pellets: 6, spread: 0.05, cellsW: 2, cellsH: 2, ammoType: 'shell' } },
       { kind: 'blessing', icon: '😇', name: `祝福·${bless.name}`, desc: `${bless.boon}${bless.curse ? '（代价 ' + bless.curse + '）' : ''}`, price: 200, payload: bless },
     ];
-    // 随机抽 3 个
+    if (this.player.weapons.some((w) => w.ammoType === 'shell')) {
+      pool.push({ kind: 'ammoS', icon: '🔴', name: '霰弹 ×24', desc: '补充霰弹弹药', price: 70 });
+    }
+    // 固定 1 个防御商品 + 随机 3 个局内补给/临时增益
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
     }
-    return pool.slice(0, 3);
+    return [shieldItem, ...pool.slice(0, 3)];
   }
 
           buyShopItem(i        )       {
@@ -4255,12 +6142,23 @@ class Game {
     if (!it || it.sold) return;
     if (this.bag.coins < it.price) { this.hud.showToast('💰 局内金币不足'); return; }
     let ok = true;
-    if (it.kind === 'med' || it.kind === 'sedative' || it.kind === 'grenade') {
+    if (it.kind === 'med' || it.kind === 'sedative' || it.kind === 'grenade' ||
+        it.kind === 'honey' || it.kind === 'adren' || it.kind === 'osiris') {
       ok = this.bag.addConsumable(it.payload                  );
     } else if (it.kind === 'ammoR') {
       this.bag.addBulletsOf('rifle', 60);
-    } else if (it.kind === 'weapon') {
-      ok = this.bag.addItem(makeWeaponItem(it.payload             ));
+    } else if (it.kind === 'ammoS') {
+      this.bag.addBulletsOf('shell', 24);
+    } else if (it.kind === 'shield') {
+      if (this.player.addShieldUnits(1) <= 0) {
+        this.hud.showToast('🛡️ 护盾已满');
+        return;
+      }
+    } else if (it.kind === 'shieldBig') {
+      if (this.player.addShieldUnits(2) <= 0) {
+        this.hud.showToast('🛡️ 护盾已满');
+        return;
+      }
     } else if (it.kind === 'blessing') {
       this.applyBuff(it.payload        );
     }
@@ -4431,6 +6329,7 @@ class Game {
         if (result.killed) { this.onKill(target.z); break; }
       } else if (target.boss && !target.boss.dead) {
         const result = target.boss.takeDamage(dmg, 'body');
+        this.syncBossBar();
         this.hud.showHitmarker(false);
         this.hud.floatText(end, `${result.dmg}`, 'dmg');
         this.audio.hit();
@@ -4478,6 +6377,7 @@ class Game {
         const dmg = Math.round(this.player.baseDamage * this.player.damageMult * hsMult);
         if (obj.userData.boss) {
           const result = (obj.userData.boss            ).takeDamage(dmg, part);
+          this.syncBossBar();
           this.hud.showHitmarker(result.headshot);
           this.hud.floatText(hits[0].point, `${result.dmg}`, result.headshot ? 'head' : 'dmg');
           if (result.headshot) this.audio.headshot();
@@ -4514,8 +6414,7 @@ class Game {
     this.hud.hideSearchPanel();
     this.hud.hideSearchRing();
     this.searchTarget = null;
-    this.state = 'moving';
-    this.hud.setPrompt(null);
+    this.completeNode('搜刮结束，打开地图选择下一关');
   }
 
   // 战斗房清场后激活战利品箱高亮（变为可搜索）
@@ -4527,7 +6426,7 @@ class Game {
     }
   }
 
-          onEnterRoom(room      )       {
+          onEnterRoom(room      )          {
     this.enteredDepth = room.depth;
     // 肾上腺素衰减：之后3个房间各 -10 生命/理智
     if (this.adrenalineRooms > 0) {
@@ -4545,10 +6444,9 @@ class Game {
       this.hud.showIntel(
         `<b style="color:#ffd24d; font-size:19px">${theme.name}</b><br><br>${theme.story}`
       );
+      return false;
     }
-    if (!this.pendingChoice && room.depth >= this.dungeon.currentDepth) {
-      this.appendNext();
-    }
+    return true;
   }
 
           onRoomCenter(room      )       {
@@ -4585,22 +6483,21 @@ class Game {
         chapter
       );
       this.boss.onSpit = (origin               ) => this.spawnEnemyShot(origin);
-      this.boss.onSummon = (pos               ) => {
-        this.zombies.spawn(pos, room.depth, 'normal');
-      };
       this.hud.showBossBar(`👹 ${this.boss.name}`);
-      this.audio.bossRoar();
       this.state = 'combat';
+      this.audio.bossRoar();
     } else if (room.type === 'curse') {
       // 门口停下，点击恶魔祭坛抉择后再继续
       this.state = 'interact';
-      this.hud.setPrompt('点击发光的诅咒祭坛抉择');
+      this.enableRouteChoiceFromMap();
+      this.hud.setPrompt('点击发光的诅咒祭坛抉择；也可打开地图直接前往下一关');
     } else if (room.type === 'safehouse') {
-      // 无怪：篝火与补给立即可交互（无需先点篝火），完成后点"继续前进"选择房间
+      // 无怪：篝火与补给立即可交互，完成后打开地图选择下一关
       if (room.crates.length) this.activateRoomLoot(room);
       this.state = 'search';
-      this.hud.setPrompt('点击篝火回理智、搜刮补给，完成后点"继续前进"');
-      this.hud.showSearchPanel('安全屋：点击篝火/补给，或继续前进');
+      this.enableRouteChoiceFromMap();
+      this.hud.setPrompt('点击篝火回理智、搜刮补给；也可打开地图直接前往下一关');
+      this.hud.showSearchPanel('安全屋：搜刮或打开地图前进');
     } else if (room.type === 'shop') {
       this.state = 'shop';
       this.openShop();
@@ -4611,9 +6508,21 @@ class Game {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     const time = this.clock.elapsedTime;
 
-    // 打开背包 / 暂停按钮：仅渲染，冻结一切模拟
-    if (this.paused || this.userPaused) {
+    if (this.transitioning) {
+      this.updateRouteTransition(dt);
       this.renderer.render(this.scene, this.camera);
+      this.input.endFrame();
+      return;
+    }
+
+    if (this.input.wasPressed('Backquote')) {
+      this.toggleDebugRouteMode();
+    }
+
+    // 打开背包 / 暂停按钮 / 路线图：仅渲染，冻结一切模拟
+    if (this.paused || this.userPaused || this.routePaused) {
+      this.renderer.render(this.scene, this.camera);
+      this.input.endFrame();
       return;
     }
 
@@ -4656,19 +6565,20 @@ class Game {
     const goneOrbs = this.lootOrbs.filter((o) => o.mesh.position.z > this.player.position.z + 7);
     for (const o of goneOrbs) this.scene.remove(o.mesh);
     this.lootOrbs = this.lootOrbs.filter((o) => o.mesh.position.z <= this.player.position.z + 7);
+    this.maybeFinishPendingLoot();
 
     if (this.state !== 'over') {
+      const blocked = this.state === 'intel' || this.state === 'shop' || this.state === 'choice' || this.state === 'extract';
       if (this.input.wasPressed('KeyR')) this.tryReload();
+      if (this.input.wasPressed('KeyE') && this.assistant && !blocked) this.useSkill();
       if (this.input.wasPressed('KeyQ')) {
         this.player.switchWeapon(this.audio);
         this.hud.setWeaponSelected(this.player.weaponIndex);
       }
-      if (this.input.wasPressed('Digit1')) this.useConsumable('med');
-      if (this.input.wasPressed('Digit2')) this.useConsumable('sedative');
+      if (this.input.wasPressed('Digit1')) this.useConsumable(this.hud.getQuickConsumable(0));
+      if (this.input.wasPressed('Digit2')) this.useConsumable(this.hud.getQuickConsumable(1));
       if (this.input.wasPressed('Digit3')) this.useConsumable('grenade');
-      if (this.input.wasPressed('Digit4')) this.useSkill();
 
-      const blocked = this.state === 'intel' || this.state === 'shop' || this.state === 'choice' || this.state === 'extract';
       // V6：长按进入手动 ADS（含搜索房；短按仍用于点击箱子，靠 0.15s 阈值区分）
       const manualAim = !blocked && this.player.alive && this.input.isAiming();
       // 瞄准时暂停自动前进，避免操控/旋转时角色仍向前漂移
@@ -4706,33 +6616,13 @@ class Game {
 
       if (this.assistant) {
         this.assistant.update(dt, time, this.player.position, this.scene);
-      }
-
-      const room = this.roomAt(this.player.position.z);
-      if (room) {
-        this.currentRoom = room;
-        if (room.depth > this.enteredDepth) this.onEnterRoom(room);
-        if (
-          this.state === 'moving' &&
-          room.depth > this.triggeredDepth &&
-          this.player.position.z <= room.zEntry - 6   // 更靠近房门处停下（交互物均在前方，镜头不转）
-        ) {
-          this.onRoomCenter(room);
-        }
-        if (
-          this.state === 'moving' && this.pendingChoice &&
-          room.depth >= this.dungeon.currentDepth &&
-          this.player.position.z <= room.zExit + 1.6
-        ) {
-          this.state = 'choice';
-          this.hud.showChoice(this.pendingChoice, this.dungeon.currentDepth + 1, this.sanityReduce);
-        }
+        if (!blocked) this.updateAssistantAutoAttack();
       }
 
       if (!blocked && (this.state === 'combat' || this.zombies.zombies.length > 0)) {
         const hits = this.zombies.update(dt, time, this.player.position, this.audio);
         for (let i = 0; i < hits.hpHits; i++) {
-          this.player.takeDamage(8 + Math.floor(this.dungeon.currentDepth / 4));
+          this.applyMonsterDamage(8 + Math.floor(this.dungeon.currentDepth / 4));
         }
         for (let i = 0; i < hits.sanityHits; i++) {
           this.player.sanity = Math.max(0, this.player.sanity - 6);
@@ -4753,7 +6643,8 @@ class Game {
             this.hud.updateBossBar(this.boss.hp, this.boss.maxHp, this.boss.phase);
           }
           for (let i = 0; i < bossHits; i++) {
-            this.player.takeDamage(22);
+            const dmg = 22;
+            this.applyMonsterDamage(dmg);
           }
           if (this.boss.removed) {
             this.boss.dispose(this.scene);
@@ -4772,18 +6663,19 @@ class Game {
               // 神之祝福：清场后在前方圆台激活可点击特效，点击领取
               this.revealBlessing(room);
               this.state = 'interact';
+              this.enableRouteChoiceFromMap();
               this.hud.showToast('😇 精英已伏诛！点击圆台上的祝福光环领取');
-              this.hud.setPrompt('点击圆台上的金色光环领取祝福');
+              this.hud.setPrompt('点击圆台上的金色光环领取祝福；也可打开地图直接前往下一关');
             } else if (room && room.crates.some((c) => !c.userData.searched)) {
               // 补给/宝石：清场后揭示战利品箱可搜
               this.activateRoomLoot(room);
               this.state = 'search';
+              this.enableRouteChoiceFromMap();
               this.hud.showToast('✅ 区域已清空，可搜刮发光的战利品箱');
-              this.hud.setPrompt('点击发光的箱子搜刮，或点"继续前进"');
-              this.hud.showSearchPanel('点击发光的箱子搜索');
+              this.hud.setPrompt('点击发光的箱子搜刮；也可打开地图直接前往下一关');
+              this.hud.showSearchPanel('搜刮箱子，或打开地图前进');
             } else {
-              this.state = 'moving';
-              this.hud.showToast('✅ 区域安全，继续前进');
+              this.completeNode('✅ 区域安全，打开地图选择下一关');
             }
           }
         }
@@ -4798,7 +6690,8 @@ class Game {
         );
         if (d < 0.6) {
           s.dead = true;
-          this.player.takeDamage(7 + Math.floor(this.dungeon.currentDepth / 5));
+          const dmg = 7 + Math.floor(this.dungeon.currentDepth / 5);
+          this.applyMonsterDamage(dmg);
           this.audio.hit();
         }
       }
@@ -4867,10 +6760,10 @@ class Game {
                   this.maybeFinishSafehouse();   // 安全屋需搜完且点过篝火
                 } else {
                   this.finishSearch();
-                  this.hud.showToast('箱子已搜空，继续前进');
                 }
               } else {
-                this.hud.showSearchPanel('点击下一个发光箱子，或继续前进');
+                this.enableRouteChoiceFromMap();
+                this.hud.showSearchPanel('点击下一个发光箱子，或打开地图前进');
               }
             } else {
               this.hud.hideSearchPanel();
@@ -4886,7 +6779,7 @@ class Game {
     this.input.endFrame();
 
     this.hud.update(
-      dt, this.player.hp, this.player.maxHp,
+      dt, this.player.hp, this.player.maxHp, this.player.shieldCount, this.player.maxShieldCount,
       this.player.sanity, this.player.maxSanity,
       this.player.ammo, this.player.magSize, this.player.reloading, this.player.reloadTime,
       this.bag.totalValue, this.dungeon.currentDepth,
@@ -4958,6 +6851,67 @@ const meta = new Meta();
 const audio = new AudioFX();
 let selectedStart = 0;
 
+function ensureAudioStarted()       {
+  audio.startAmbient();
+  audio.init();
+}
+
+document.addEventListener('click', (e) => {
+  const target = e.target                      ;
+  const button = target?.closest('button')                            ;
+  if (!button || button.disabled) return;
+  ensureAudioStarted();
+  audio.click();
+}, true);
+
+window.addEventListener('pointerdown', () => ensureAudioStarted(), true);
+window.addEventListener('keydown', () => ensureAudioStarted(), true);
+
+function volumeText(value        )         {
+  return `${Math.round(value * 100)}%`;
+}
+
+function syncVolumeControls()       {
+  const pairs = [
+    { slider: 'home-music-slider', label: 'home-music-val', value: audio.getMusicVolume() },
+    { slider: 'pause-music-slider', label: 'pause-music-val', value: audio.getMusicVolume() },
+    { slider: 'home-sfx-slider', label: 'home-sfx-val', value: audio.getSfxVolume() },
+    { slider: 'pause-sfx-slider', label: 'pause-sfx-val', value: audio.getSfxVolume() },
+  ];
+  for (const p of pairs) {
+    const slider = document.getElementById(p.slider)                           ;
+    const label = document.getElementById(p.label);
+    if (slider) slider.value = p.value.toFixed(2);
+    if (label) label.textContent = volumeText(p.value);
+  }
+}
+
+function bindVolumeSlider(id        , kind                 )       {
+  const slider = document.getElementById(id)                           ;
+  if (!slider) return;
+  slider.addEventListener('input', () => {
+    const value = parseFloat(slider.value);
+    if (kind === 'music') audio.setMusicVolume(value);
+    else audio.setSfxVolume(value);
+    syncVolumeControls();
+  });
+}
+
+bindVolumeSlider('home-music-slider', 'music');
+bindVolumeSlider('pause-music-slider', 'music');
+bindVolumeSlider('home-sfx-slider', 'sfx');
+bindVolumeSlider('pause-sfx-slider', 'sfx');
+
+const homeSettingsBtn = document.getElementById('home-settings-btn') ;
+const homeSettingsPanel = document.getElementById('home-settings-panel') ;
+homeSettingsBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  homeSettingsPanel.classList.toggle('open');
+});
+homeSettingsPanel.addEventListener('click', (e) => e.stopPropagation());
+syncVolumeControls();
+audio.startAmbient();
+
 function refreshBank()       {
   document.getElementById('bank-text') .textContent =
     `💰 金库 ${meta.data.bank} ｜ 最深 ${meta.data.bestDepth} ｜ 撤离 ${meta.data.extracts}/${meta.data.runs} ｜ 图鉴 ${meta.data.collection.length}/${TREASURES.length + RELICS.length}`;
@@ -5013,6 +6967,12 @@ const SHOP              = [
     buy: () => { meta.data.magLv += 1; },
   },
   {
+    label: () => `🛡️ 护盾槽扩容 Lv${meta.data.shieldCapLv}/3（每级+1护盾上限）`,
+    cost: () => 140 * (meta.data.shieldCapLv + 1),
+    canBuy: () => meta.data.shieldCapLv < 3,
+    buy: () => { meta.data.shieldCapLv += 1; },
+  },
+  {
     label: () => meta.data.assistantOwned ? '🦉 助手·夜枭（已雇佣）' : '🦉 雇佣助手·夜枭：搜索+35%/回神智/群体电击',
     cost: () => 250,
     canBuy: () => !meta.data.assistantOwned,
@@ -5049,6 +7009,60 @@ function renderArmory()       {
   }
 }
 
+// ===== 养成（局外金币永久强化） =====
+const TRAINING              = [
+  {
+    label: () => `❤️ 生命训练 Lv${meta.data.hpLv}/5（每级生命上限 +${HP_TRAINING_STEP}）`,
+    cost: () => 90 * (meta.data.hpLv + 1),
+    canBuy: () => meta.data.hpLv < 5,
+    buy: () => { meta.data.hpLv += 1; },
+  },
+  {
+    label: () => `🧠 神志训练 Lv${meta.data.sanityLv}/5（每级神志上限 +${SANITY_TRAINING_STEP}）`,
+    cost: () => 80 * (meta.data.sanityLv + 1),
+    canBuy: () => meta.data.sanityLv < 5,
+    buy: () => { meta.data.sanityLv += 1; },
+  },
+  {
+    label: () => {
+      const pct = Math.round((1 - RELOAD_TRAINING_MULT) * 100);
+      return `🔁 战术换弹 Lv${meta.data.reloadLv}/1（非手枪换弹时间 -${pct}%）`;
+    },
+    cost: () => 260,
+    canBuy: () => meta.data.reloadLv < 1,
+    buy: () => { meta.data.reloadLv = 1; },
+  },
+];
+
+function renderProgression()       {
+  const panel = document.getElementById('progression-panel') ;
+  panel.innerHTML = '';
+  for (const entry of TRAINING) {
+    const row = document.createElement('div');
+    row.className = 'shop-row';
+    const buyable = entry.canBuy();
+    row.innerHTML = `<strong>${entry.label()}</strong>`;
+    const btn = document.createElement('button');
+    if (buyable) {
+      btn.textContent = `💰 ${entry.cost()}`;
+      btn.disabled = meta.data.bank < entry.cost();
+      btn.addEventListener('click', () => {
+        if (meta.spend(entry.cost())) {
+          entry.buy();
+          meta.save();
+          refreshBank();
+          renderProgression();
+        }
+      });
+    } else {
+      btn.textContent = '✓';
+      btn.disabled = true;
+    }
+    row.appendChild(btn);
+    panel.appendChild(row);
+  }
+}
+
 // ===== 收藏图鉴 =====
 function renderGallery()       {
   const g = document.getElementById('gallery') ;
@@ -5071,17 +7085,23 @@ function renderGallery()       {
 let tab = '';
 function setTab(t        )       {
   tab = tab === t ? '' : t;
+  if (tab === 'armory') renderArmory();
+  if (tab === 'progression') renderProgression();
+  if (tab === 'gallery') renderGallery();
   document.getElementById('armory-panel') .style.display = tab === 'armory' ? 'flex' : 'none';
+  document.getElementById('progression-panel') .style.display = tab === 'progression' ? 'flex' : 'none';
   document.getElementById('gallery') .style.display = tab === 'gallery' ? 'flex' : 'none';
   document.getElementById('tab-armory') .className = 'tab-btn' + (tab === 'armory' ? ' active' : '');
+  document.getElementById('tab-progression') .className = 'tab-btn' + (tab === 'progression' ? ' active' : '');
   document.getElementById('tab-gallery') .className = 'tab-btn' + (tab === 'gallery' ? ' active' : '');
 }
 document.getElementById('tab-armory') .addEventListener('click', () => setTab('armory'));
+document.getElementById('tab-progression') .addEventListener('click', () => setTab('progression'));
 document.getElementById('tab-gallery') .addEventListener('click', () => setTab('gallery'));
 
 function startGame(startDepth        )       {
-  audio.init();
-  audio.startAmbient();
+  ensureAudioStarted();
+  document.getElementById('stage') .classList.add('game-started');
   document.getElementById('start-overlay') .style.display = 'none';
   const canvas = document.getElementById('game-canvas')                     ;
   const game = new Game(canvas, meta, audio, startDepth);
@@ -5100,6 +7120,7 @@ if (meta.data.checkpoint > 0) {
 refreshBank();
 renderChapters();
 renderArmory();
+renderProgression();
 renderGallery();
 
 </script>

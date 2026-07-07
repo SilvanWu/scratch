@@ -1,20 +1,109 @@
 // 程序化音效 + 微恐环境音（WebAudio）
+const MUSIC_VOLUME_KEY = 'tomb_music_volume_v1';
+const SFX_VOLUME_KEY = 'tomb_sfx_volume_v1';
+
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
 export class AudioFX {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  private music: HTMLAudioElement | null = null;
+  private pistolShots: HTMLAudioElement[] = [];
+  private pistolShotCursor: number = 0;
+  private reloadClip: HTMLAudioElement | null = null;
+  private reloadToken: number = 0;
+  private reloadLoopsLeft: number = 0;
+  private readonly reloadFallbackDuration: number = 0.99;
+  private musicStarted: boolean = false;
+  private musicPausedByGame: boolean = false;
+  private musicVolume: number = this.loadVolume(MUSIC_VOLUME_KEY, 0.55);
+  private sfxVolume: number = this.loadVolume(SFX_VOLUME_KEY, 0.9);
   private droneOsc: OscillatorNode[] = [];
   private groanTimer: number = 6;
   private heartTimer: number = 0;
+
+  constructor() {
+    this.setupMusic();
+    this.setupSfxSamples();
+  }
+
+  private loadVolume(key: string, fallback: number): number {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw === null) return fallback;
+      const v = parseFloat(raw);
+      return Number.isFinite(v) ? clamp01(v) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  private saveVolume(key: string, value: number): void {
+    try { localStorage.setItem(key, value.toFixed(2)); } catch {}
+  }
 
   init(): void {
     if (!this.ctx) {
       const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
       this.ctx = new AC();
       this.master = this.ctx!.createGain();
-      this.master.gain.value = 1;
+      this.master.gain.value = this.sfxVolume;
       this.master.connect(this.ctx!.destination);
     }
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+    this.setupMusic();
+  }
+
+  private setupMusic(): void {
+    if (this.music) return;
+    this.music = new Audio('assets/audio/BGM.mp3');
+    this.music.loop = true;
+    this.music.preload = 'auto';
+    this.music.volume = this.musicVolume;
+  }
+
+  private setupSfxSamples(): void {
+    if (this.pistolShots.length <= 0) {
+      for (let i = 0; i < 4; i++) {
+        const shot = new Audio('assets/audio/pistol---one-shot_[cut_0sec].mp3');
+        shot.preload = 'auto';
+        shot.volume = this.sfxVolume;
+        this.pistolShots.push(shot);
+      }
+    }
+    if (!this.reloadClip) {
+      this.reloadClip = new Audio('assets/audio/pistol-reload.mp3');
+      this.reloadClip.preload = 'auto';
+      this.reloadClip.volume = this.sfxVolume;
+      this.reloadClip.load();
+    }
+  }
+
+  getMusicVolume(): number { return this.musicVolume; }
+  getSfxVolume(): number { return this.sfxVolume; }
+
+  setMusicVolume(value: number): void {
+    this.musicVolume = clamp01(value);
+    this.saveVolume(MUSIC_VOLUME_KEY, this.musicVolume);
+    this.setupMusic();
+    if (this.music) this.music.volume = this.musicVolume;
+    if (this.musicVolume <= 0) {
+      if (this.music && !this.music.paused) this.music.pause();
+      return;
+    }
+    this.startAmbient();
+  }
+
+  setSfxVolume(value: number): void {
+    this.sfxVolume = clamp01(value);
+    this.saveVolume(SFX_VOLUME_KEY, this.sfxVolume);
+    if (this.master) {
+      this.master.gain.value = this.sfxVolume;
+    }
+    for (const shot of this.pistolShots) shot.volume = this.sfxVolume;
+    if (this.reloadClip) this.reloadClip.volume = this.sfxVolume;
   }
 
   private beep(
@@ -60,9 +149,74 @@ export class AudioFX {
     this.noise(0.16, 0.4, 2200);
     this.beep(160, 0.1, 'square', 0.16, 50);
   }
+  pistolShot(): void {
+    this.setupSfxSamples();
+    const shot = this.pistolShots[this.pistolShotCursor % this.pistolShots.length];
+    this.pistolShotCursor += 1;
+    shot.volume = this.sfxVolume;
+    shot.currentTime = 0;
+    const pending = shot.play();
+    if (pending) {
+      pending.catch(() => this.gunshot());
+    }
+  }
+  click(): void {
+    this.beep(980, 0.035, 'square', 0.035, 720);
+    this.beep(1320, 0.025, 'triangle', 0.025, undefined, 0.025);
+  }
   dryFire(): void { this.beep(900, 0.04, 'square', 0.05); }
-  reloadStart(): void { this.beep(500, 0.06, 'square', 0.07, 300); }
+  private getReloadClipDuration(): number {
+    if (this.reloadClip && Number.isFinite(this.reloadClip.duration) && this.reloadClip.duration > 0) {
+      return this.reloadClip.duration;
+    }
+    return this.reloadFallbackDuration;
+  }
+
+  private stopReloadLoop(): void {
+    this.reloadToken += 1;
+    this.reloadLoopsLeft = 0;
+    if (!this.reloadClip) return;
+    this.reloadClip.onended = null;
+    this.reloadClip.pause();
+    try { this.reloadClip.currentTime = 0; } catch {}
+  }
+
+  reloadStart(reloadDuration: number = 0): void {
+    this.setupSfxSamples();
+    if (!this.reloadClip) {
+      this.beep(500, 0.06, 'square', 0.07, 300);
+      return;
+    }
+    this.stopReloadLoop();
+    const clipDuration = this.getReloadClipDuration();
+    const loops = reloadDuration > 0 ? Math.floor(reloadDuration / clipDuration) : 1;
+    if (loops <= 0) return;
+    const token = this.reloadToken;
+    this.reloadLoopsLeft = loops;
+
+    const playNext = (): void => {
+      if (token !== this.reloadToken || !this.reloadClip || this.reloadLoopsLeft <= 0) {
+        if (this.reloadClip) this.reloadClip.onended = null;
+        return;
+      }
+      const clip = this.reloadClip;
+      this.reloadLoopsLeft -= 1;
+      clip.onended = playNext;
+      clip.volume = this.sfxVolume;
+      clip.pause();
+      try { clip.currentTime = 0; } catch {}
+      const pending = clip.play();
+      if (pending) {
+        pending.catch(() => {
+          if (token === this.reloadToken) this.beep(500, 0.06, 'square', 0.07, 300);
+        });
+      }
+    };
+
+    playNext();
+  }
   reloadEnd(): void {
+    this.stopReloadLoop();
     this.beep(700, 0.05, 'square', 0.08);
     this.beep(1100, 0.06, 'square', 0.07, undefined, 0.07);
   }
@@ -74,6 +228,16 @@ export class AudioFX {
   zombieDie(): void { this.beep(120, 0.4, 'sawtooth', 0.12, 40); }
   zombieGroan(vol: number = 0.07): void {
     this.beep(75 + Math.random() * 40, 0.7, 'sawtooth', vol, 55);
+  }
+  bossRoar(): void {
+    this.noise(0.75, 0.34, 320);
+    this.beep(58, 0.9, 'sawtooth', 0.18, 32);
+    this.beep(96, 0.55, 'square', 0.08, 45, 0.12);
+  }
+  thunderLike(): void {
+    this.noise(0.22, 0.22, 1800);
+    this.beep(88, 0.24, 'sawtooth', 0.12, 44);
+    this.beep(1500, 0.08, 'square', 0.06, 620, 0.02);
   }
   meleeHit(): void {
     this.noise(0.12, 0.3, 800);
@@ -114,8 +278,27 @@ export class AudioFX {
 
   // 暗黑低音垫（持续环境音）
   startAmbient(): void {
-    // 已移除背景音乐（低频持续drone），仅保留事件音效与氛围音
-    return;
+    this.setupMusic();
+    if (!this.music) return;
+    if (this.musicPausedByGame || this.musicVolume <= 0) return;
+    if (this.musicStarted && !this.music.paused) return;
+    this.musicStarted = true;
+    const pending = this.music.play();
+    if (pending) {
+      pending.catch(() => {
+        this.musicStarted = false;
+      });
+    }
+  }
+
+  pauseAmbient(): void {
+    this.musicPausedByGame = true;
+    if (this.music && !this.music.paused) this.music.pause();
+  }
+
+  resumeAmbient(): void {
+    this.musicPausedByGame = false;
+    this.startAmbient();
   }
 
   // 每帧：低神智心跳（已去除随机远处低吼）

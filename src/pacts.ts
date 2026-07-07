@@ -23,6 +23,7 @@ export const BLESSINGS: Pact[] = [
   { id: 'bless_calm',     name: '头脑冷静', icon: '🧊', boon: '进入房间消耗的理智 -1（最多3层）', curse: '' },
   { id: 'bless_reaper',   name: '死神之力', icon: '☠️', boon: '击杀后 15% 概率回 5 生命', curse: '' },
   { id: 'bless_marksman', name: '神枪手',   icon: '🎯', boon: '爆头伤害 +10%', curse: '' },
+  { id: 'bless_owl_fury', name: '夜枭共鸣', icon: '🦉', boon: '宠物伤害 +25%', curse: '' },
 ];
 
 // 神之诅咒（祭坛抉择）：以理智/生命（或上限）为代价换增益

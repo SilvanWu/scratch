@@ -9,11 +9,18 @@ export interface MetaData {
   shotgunOwned: boolean;       // 霰弹枪解锁
   pistolDmgLv: number;         // 手枪伤害改装 0~3
   magLv: number;               // 弹夹扩容 0~2
+  shieldCapLv: number;         // 护盾槽扩容 0~3（局外永久升级）
+  hpLv: number;                 // 体能训练 0~5（局外永久升级）
+  sanityLv: number;             // 意志训练 0~5（局外永久升级）
+  reloadLv: number;             // 换弹训练 0~1（局外永久升级）
   assistantOwned: boolean;     // 助手"夜枭"解锁
   collection: string[];        // 收藏品图鉴（按名字）
 }
 
 const KEY = 'tomb_meta_v1';
+export const HP_TRAINING_STEP = 10;
+export const SANITY_TRAINING_STEP = 6;
+export const RELOAD_TRAINING_MULT = 0.92;
 
 export class Meta {
   data: MetaData;
@@ -22,6 +29,7 @@ export class Meta {
     this.data = {
       bank: 0, bestDepth: 0, runs: 0, extracts: 0, checkpoint: 0,
       chaptersCleared: 0, shotgunOwned: false, pistolDmgLv: 0, magLv: 0,
+      shieldCapLv: 0, hpLv: 0, sanityLv: 0, reloadLv: 0,
       assistantOwned: false, collection: [],
     };
     try {

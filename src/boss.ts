@@ -13,19 +13,12 @@ export class TombBoss {
   removed: boolean = false;
   phase: number = 1;
 
-  private speed: number = 1.1;
-  private chargeTimer: number = 4;
-  private charging: number = 0;
-  private chargeDir: THREE.Vector3 = new THREE.Vector3();
   private spitTimer: number = 2.5;
-  private summonTimer: number = 6;
-  private attackTimer: number = 0;
   private deathTimer: number = 0;
   private bodyMat: THREE.MeshStandardMaterial;
   private flashTimer: number = 0;
 
   onSpit: ((origin: THREE.Vector3) => void) | null = null;
-  onSummon: ((pos: THREE.Vector3) => void) | null = null;
 
   constructor(scene: THREE.Scene, pos: THREE.Vector3, chapter: number) {
     const names = ['沙之暴君', '羽蛇祭司', '青铜俑将'];
@@ -86,7 +79,7 @@ export class TombBoss {
     scene.add(this.mesh);
   }
 
-  // 返回本帧近战命中次数
+  // 返回本帧命中次数
   update(dt: number, time: number, playerPos: THREE.Vector3, audio: AudioFX): number {
     if (this.dead) {
       this.deathTimer += dt;
@@ -98,7 +91,6 @@ export class TombBoss {
     // 阶段切换
     if (this.phase === 1 && this.hp < this.maxHp * 0.5) {
       this.phase = 2;
-      this.speed = 1.5;
       this.bodyMat.emissive.setHex(0x441111);
       audio.zombieGroan(0.16);
     }
@@ -106,44 +98,26 @@ export class TombBoss {
     const to = new THREE.Vector3().subVectors(playerPos, this.mesh.position);
     to.y = 0;
     const dist = to.length();
-    to.normalize();
-
-    if (this.charging > 0) {
-      this.charging -= dt;
-      this.mesh.position.addScaledVector(this.chargeDir, 7.5 * dt);
-    } else {
-      this.chargeTimer -= dt;
-      if (this.chargeTimer <= 0) {
-        this.chargeTimer = this.phase === 2 ? 4.5 : 6;
-        this.charging = 0.9;
-        this.chargeDir.copy(to);
-        audio.zombieGroan(0.14);
-      } else {
-        this.mesh.position.addScaledVector(to, this.speed * dt);
-      }
+    if (dist > 0.001) {
+      to.normalize();
+      this.mesh.rotation.y = Math.atan2(to.x, to.z);
     }
-    this.mesh.rotation.y = Math.atan2(to.x, to.z);
     this.mesh.position.y = Math.abs(Math.sin(time * 3)) * 0.06;
 
-    // 二阶段：吐弹 + 召唤
-    if (this.phase === 2) {
-      this.spitTimer -= dt;
-      if (this.spitTimer <= 0 && this.onSpit) {
-        this.spitTimer = 2.8;
-        for (let i = 0; i < 3; i++) {
-          this.onSpit(this.mesh.position.clone().setY(this.mesh.position.y + 4));
-        }
+    // 玩家不能移动时，BOSS 只作为远程火力点存在：不追击、不冲锋、不近战。
+    this.spitTimer -= dt;
+    if (this.spitTimer <= 0 && this.onSpit && dist > 2.5 && dist < 32) {
+      const volley = this.phase === 2 ? 3 : 1;
+      this.spitTimer = this.phase === 2 ? 2.4 : 3.0;
+      for (let i = 0; i < volley; i++) {
+        const side = i - (volley - 1) / 2;
+        this.onSpit(
+          this.mesh.position.clone()
+            .setY(this.mesh.position.y + 4)
+            .add(new THREE.Vector3(side * 0.55, 0, 0))
+        );
       }
-      this.summonTimer -= dt;
-      if (this.summonTimer <= 0 && this.onSummon) {
-        this.summonTimer = 9;
-        for (let i = 0; i < 2; i++) {
-          const a = Math.random() * Math.PI * 2;
-          this.onSummon(this.mesh.position.clone().add(
-            new THREE.Vector3(Math.cos(a) * 3, 0, Math.sin(a) * 3)
-          ));
-        }
-      }
+      audio.zombieGroan(this.phase === 2 ? 0.12 : 0.08);
     }
 
     if (this.flashTimer > 0) {
@@ -153,12 +127,6 @@ export class TombBoss {
       }
     }
 
-    this.attackTimer -= dt;
-    if (dist < 2.6 && this.attackTimer <= 0) {
-      this.attackTimer = 1.6;
-      audio.meleeHit();
-      return 1;
-    }
     return 0;
   }
 

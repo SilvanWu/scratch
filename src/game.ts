@@ -1,23 +1,24 @@
 import * as THREE from 'three';
 import { Input } from './input';
 import { AudioFX } from './audio';
-import { Meta } from './meta';
+import { Meta, HP_TRAINING_STEP, SANITY_TRAINING_STEP, RELOAD_TRAINING_MULT } from './meta';
 import { Backpack, InvItem, WeaponDef, makeWeaponItem, makeTreasureItem, makeConsumableItem, makeAmmoItem, TreasureItem, CONSUMABLE_INFO, ConsumableKind, RARITY_INFO, RELICS, rollCrateContent } from './items';
-import { Dungeon, Room, RoomType, themeForDepth, sanityCostFor } from './rooms';
+import { Dungeon, Room, RouteNode, ROOM_INFO, themeForDepth, sanityCostFor } from './rooms';
 import { ZombieManager, Zombie } from './enemy';
 import { PlayerRig } from './player';
 import { TombBoss } from './boss';
-import { Assistant } from './assistant';
+import { Assistant, AssistantTarget } from './assistant';
 import { Pact, rollPacts, rollBlessing, BLESSINGS, rollCurses } from './pacts';
 import { HUD } from './hud';
 
-type GameState = 'moving' | 'combat' | 'search' | 'choice' | 'extract' | 'intel' | 'interact' | 'shop' | 'over';
+type GameState = 'moving' | 'combat' | 'search' | 'loot' | 'choice' | 'extract' | 'intel' | 'interact' | 'shop' | 'over';
 
 const STATE_LABEL: Record<string, string> = {
   moving: '▶ 前进中…',
   combat: '⚔ 战斗！消灭所有敌人',
   search: '🔍 搜索中（点击箱子）',
-  choice: '🚪 选择房间',
+  loot: '💰 拾取掉落',
+  choice: '🗺 选择路线',
   extract: '🟢 撤离点',
   intel: '📋 情报',
   interact: '✋ 点击交互',
@@ -35,6 +36,20 @@ interface EnemyShot {
   velocity: THREE.Vector3;
   life: number;
   dead: boolean;
+}
+
+type RunShopKind =
+  'med' | 'sedative' | 'grenade' | 'honey' | 'adren' | 'osiris' |
+  'ammoR' | 'ammoS' | 'shield' | 'shieldBig' | 'blessing';
+
+interface RunShopItem {
+  kind: RunShopKind;
+  icon: string;
+  name: string;
+  desc: string;
+  price: number;
+  sold?: boolean;
+  payload?: Pact | ConsumableKind;
 }
 
 export class Game {
@@ -57,12 +72,20 @@ export class Game {
   private pistolDef!: WeaponDef;     // 默认武器（无装备时兜底）
   private paused: boolean = false;   // 打开背包时暂停
   private userPaused: boolean = false; // 暂停按钮
+  private routePaused: boolean = false; // 展开路线图时暂停
+  private debugRouteMode: boolean = false; // 调试选关：~ 开关，地图任意节点可进入
+  private transitioning: boolean = false;
+  private transitionNode: RouteNode | null = null;
+  private transitionDebugJump: boolean = false;
+  private transitionTimer: number = 0;
+  private readonly transitionHold: number = 0.08;
+  private readonly transitionFadeOut: number = 0.32;
 
   private state: GameState = 'moving';
   private currentRoom: Room | null = null;
   private enteredDepth: number;
   private triggeredDepth: number;
-  private pendingChoice: RoomType[] | null = null;
+  private pendingRoomStart: Room | null = null;
   private kills: number = 0;
   private searchTarget: THREE.Mesh | null = null;
   private searchProgress: number = 0;
@@ -70,6 +93,7 @@ export class Game {
   private enemyShots: EnemyShot[] = [];
   private explosions: { mesh: THREE.Mesh; age: number }[] = [];
   private lootOrbs: { mesh: THREE.Mesh; gold: number; bob: number }[] = [];  // 击杀掉落金币光点
+  private pendingRouteMessage: string | null = null;
   private lockedZombie: Zombie | null = null;  // 锁定的索敌目标
   private wasManualAim: boolean = false;        // 上一帧是否在手动瞄准（检测进入瞄准的边沿）
   private sanityReduce: number = 0;   // 头脑冷静：进房理智消耗减免（最多3）
@@ -77,6 +101,7 @@ export class Game {
   private adrenalineRooms: number = 0; // 肾上腺素剩余衰减房间数
   private shownChapterIntro: number = -1;
   private lootValueMult: number = 1;       // V5 契约：撤离结算价值加成
+  private assistantDamageMult: number = 1; // 夜枭祝福：宠物伤害倍率
   private activePacts: string[] = [];      // V5 已结契约
 
   constructor(canvas: HTMLCanvasElement, meta: Meta, audio: AudioFX, startDepth: number) {
@@ -118,6 +143,8 @@ export class Game {
     this.zombies = new ZombieManager(this.scene);
     this.zombies.onRangedShoot = (origin: THREE.Vector3) => this.spawnEnemyShot(origin);
 
+    const nonPistolReloadMult = meta.data.reloadLv > 0 ? RELOAD_TRAINING_MULT : 1;
+
     // 武器定义（占格：手枪 1×2，AK/霰弹 2×2）
     const pistol: WeaponDef = {
       name: '手枪', icon: '🔫',
@@ -131,7 +158,7 @@ export class Game {
       name: 'AK', icon: 'AK',
       damage: 9 + meta.data.pistolDmgLv,
       magSize: 30 + meta.data.magLv * 4,
-      reloadTime: 2.1, fireInterval: 0.09, pellets: 1, spread: 0,
+      reloadTime: 2.1 * nonPistolReloadMult, fireInterval: 0.09, pellets: 1, spread: 0,
       cellsW: 2, cellsH: 2, ammoType: 'rifle',
     };
     // 初始：手枪、AK 直接装入两个武器栏
@@ -146,7 +173,7 @@ export class Game {
         name: '霰弹枪', icon: '💥',
         damage: 6 + meta.data.pistolDmgLv,
         magSize: 5 + meta.data.magLv,
-        reloadTime: 1.8, fireInterval: 0.8, pellets: 6, spread: 0.05,
+        reloadTime: 1.8 * nonPistolReloadMult, fireInterval: 0.8, pellets: 6, spread: 0.05,
         cellsW: 2, cellsH: 2, ammoType: 'shell',
       }));
     }
@@ -156,6 +183,11 @@ export class Game {
     this.bag.addBulletsOf('rifle', 30);   // 手枪弹无限，不再发放手枪弹
 
     this.player = new PlayerRig(this.scene, this.camera, this.bag.equippedWeaponDefs());
+    this.player.maxHp += meta.data.hpLv * HP_TRAINING_STEP;
+    this.player.hp = this.player.maxHp;
+    this.player.maxSanity += meta.data.sanityLv * SANITY_TRAINING_STEP;
+    this.player.sanity = this.player.maxSanity;
+    this.player.configureShieldSlots(2 + meta.data.shieldCapLv, true);
 
     if (meta.data.assistantOwned) {
       this.assistant = new Assistant(this.scene);
@@ -179,16 +211,24 @@ export class Game {
     this.hud.onUseConsumableItem = (k) => this.useConsumable(k);
     this.hud.onUseSkill = () => this.useSkill();
     this.hud.onInventoryDirty = () => this.syncEquipment();
-    this.hud.onBagToggle = (open) => { this.paused = open; };
-    this.hud.onPauseToggle = (p) => { this.userPaused = p; };
+    this.hud.onBagToggle = (open) => {
+      this.paused = open;
+    };
+    this.hud.onPauseToggle = (p) => {
+      this.userPaused = p;
+      this.syncMusicPause();
+    };
+    this.hud.onRouteMapToggle = (open) => {
+      this.routePaused = open;
+      this.wasManualAim = false;
+      this.input.cancelPointer();
+    };
     this.hud.onSensitivity = (v) => { this.player.aimSensitivity = v; };
 
-    this.hud.onSkipSearch = () => this.finishSearch();
-    this.hud.onChoice = (t: RoomType) => {
-      this.pendingChoice = null;
-      this.dungeon.append(t);
-      this.audio.doorOpen();
-      this.state = 'moving';
+    this.hud.onChoice = (node: RouteNode) => {
+      const debugJump = this.debugRouteMode;
+      this.debugRouteMode = false;
+      this.beginRouteTransition(node, debugJump);
     };
     this.hud.onExtract = (leave: boolean) => {
       if (leave) {
@@ -198,11 +238,17 @@ export class Game {
       }
     };
     this.hud.onIntelContinue = () => {
-      this.state = 'moving';
+      if (this.pendingRoomStart) {
+        const room = this.pendingRoomStart;
+        this.pendingRoomStart = null;
+        this.onRoomCenter(room);
+      } else {
+        this.openRouteChoice();
+      }
     };
 
-    this.dungeon.append('corridor' as RoomType);  // 起始空走廊（无怪/无交互）
-    this.appendNext();
+    this.prepareRouteChoices();
+    this.refreshRouteMap();
     this.meta.data.runs += 1;
     this.meta.save();
 
@@ -220,20 +266,175 @@ export class Game {
     this.renderer.setAnimationLoop(() => this.tick());
   }
 
-  private appendNext(): void {
-    const options = this.dungeon.nextOptions();
-    if (options.length === 1) {
-      this.dungeon.append(options[0]);
+  private syncMusicPause(): void {
+    // 只把明确的暂停菜单视为音乐暂停。路线图/背包会冻结模拟，但仍属于游戏流程。
+    if (this.userPaused) {
+      this.audio.pauseAmbient();
     } else {
-      this.pendingChoice = options;
+      this.audio.resumeAmbient();
     }
   }
 
-  private roomAt(z: number): Room | null {
-    for (const r of this.dungeon.rooms) {
-      if (z <= r.zEntry && z > r.zExit) return r;
+  private prepareRouteChoices(): void {
+    this.dungeon.nextChoices();
+    this.refreshRouteMap();
+  }
+
+  private refreshRouteMap(): void {
+    this.hud.renderRouteMap(this.dungeon.routeSnapshot());
+  }
+
+  private openRouteChoice(message?: string): void {
+    this.prepareRouteChoices();
+    this.state = 'choice';
+    this.hud.setStateLabel(STATE_LABEL.choice);
+    this.hud.setPrompt(null);
+    if (message) this.hud.showToast(message);
+    this.hud.showRouteChoice(this.dungeon.routeSnapshot());
+  }
+
+  private enableRouteChoiceFromMap(): void {
+    this.dungeon.nextChoices();
+    this.hud.setRouteChoiceReady(this.dungeon.routeSnapshot());
+  }
+
+  private startRouteNode(node: RouteNode, debugJump: boolean = false): void {
+    this.paused = false;
+    this.userPaused = false;
+    this.routePaused = false;
+    this.syncMusicPause();
+    this.pendingRouteMessage = null;
+    this.searchTarget = null;
+    this.searchProgress = 0;
+    this.hud.dismissBlockingOverlays();
+    this.clearTransientObjects();
+    const room = this.dungeon.appendRouteNode(node, debugJump);
+    this.refreshRouteMap();
+    this.currentRoom = room;
+    this.enteredDepth = room.depth - 1;
+    this.triggeredDepth = room.depth - 1;
+    this.player.teleportTo(new THREE.Vector3(0, 0, room.zEntry - 6));
+    this.hud.setPrompt(null);
+    this.hud.hideSearchPanel();
+    this.hud.hideSearchRing();
+    this.audio.doorOpen();
+    this.recoverAssistantSkillCharge();
+    if (debugJump) this.hud.showToast(`DEBUG 跳转：${ROOM_INFO[node.type].name}`);
+    this.state = 'moving';
+    if (!this.onEnterRoom(room)) {
+      this.pendingRoomStart = room;
+      this.hud.setStateLabel(STATE_LABEL[this.state]);
+      return;
     }
-    return null;
+    this.onRoomCenter(room);
+    this.hud.setStateLabel(STATE_LABEL[this.state]);
+  }
+
+  private recoverAssistantSkillCharge(): void {
+    if (!this.assistant) return;
+    const gained = this.assistant.recoverCharge(1);
+    if (gained > 0) this.hud.updateSkill(true, this.assistant.charges);
+  }
+
+  private beginRouteTransition(node: RouteNode, debugJump: boolean = false): void {
+    if (this.transitioning) return;
+    this.paused = false;
+    this.userPaused = false;
+    this.routePaused = false;
+    this.syncMusicPause();
+    this.wasManualAim = false;
+    this.input.cancelPointer();
+    this.hud.closeRouteMap();
+    this.hud.dismissBlockingOverlays();
+    this.hud.setPrompt(null);
+    this.transitioning = true;
+    this.transitionNode = node;
+    this.transitionDebugJump = debugJump;
+    this.transitionTimer = 0;
+    this.hud.setRoomTransition(1, true);
+    this.startRouteNode(node, debugJump);
+  }
+
+  private updateRouteTransition(dt: number): void {
+    this.transitionTimer += dt;
+    const fadeOutAt = this.transitionHold;
+    const total = fadeOutAt + this.transitionFadeOut;
+
+    let alpha = 0;
+    if (this.transitionTimer < fadeOutAt) {
+      alpha = 1;
+    } else {
+      alpha = 1 - (this.transitionTimer - fadeOutAt) / this.transitionFadeOut;
+    }
+
+    if (this.transitionTimer >= total) {
+      this.transitioning = false;
+      this.transitionNode = null;
+      this.transitionDebugJump = false;
+      this.hud.setRoomTransition(0, false);
+      return;
+    }
+
+    this.hud.setRoomTransition(Math.max(0, Math.min(1, alpha)), true);
+  }
+
+  private completeNode(message?: string): void {
+    if (this.state === 'over' || this.state === 'extract') return;
+    this.searchTarget = null;
+    this.hud.hideSearchPanel();
+    this.hud.hideSearchRing();
+    this.hud.setPrompt(null);
+    if (this.lootOrbs.length > 0) {
+      this.pendingRouteMessage = message || '打开地图选择下一关';
+      this.state = 'loot';
+      this.enableRouteChoiceFromMap();
+      this.hud.setStateLabel(STATE_LABEL.loot);
+      this.hud.setPrompt('点击场景内金币光点拾取掉落；也可打开地图直接前往下一关');
+      this.hud.showToast('还有怪物掉落物未拾取');
+      return;
+    }
+    this.openRouteChoice(message);
+  }
+
+  private clearTransientObjects(): void {
+    if (this.boss) {
+      this.boss.dispose(this.scene);
+      this.boss = null;
+      this.hud.hideBossBar();
+    }
+    for (const s of this.enemyShots) {
+      this.scene.remove(s.mesh);
+      (s.mesh.material as THREE.Material).dispose();
+      s.mesh.geometry.dispose();
+    }
+    this.enemyShots = [];
+    for (const t of this.tracers) {
+      this.scene.remove(t.mesh);
+      (t.mesh.material as THREE.Material).dispose();
+      t.mesh.geometry.dispose();
+    }
+    this.tracers = [];
+    for (const e of this.explosions) {
+      this.scene.remove(e.mesh);
+      (e.mesh.material as THREE.Material).dispose();
+      e.mesh.geometry.dispose();
+    }
+    this.explosions = [];
+    for (const o of this.lootOrbs) this.scene.remove(o.mesh);
+    this.lootOrbs = [];
+    for (const z of this.zombies.zombies) z.dispose(this.scene);
+    this.zombies.zombies = [];
+    this.lockedZombie = null;
+  }
+
+  private toggleDebugRouteMode(): void {
+    if (this.state === 'over') return;
+    this.debugRouteMode = !this.debugRouteMode;
+    const snapshot = this.dungeon.routeSnapshot();
+    this.hud.setRouteDebugMode(this.debugRouteMode, snapshot);
+    this.hud.showToast(this.debugRouteMode ? 'DEBUG 选关：点击任意节点' : 'DEBUG 关闭');
+    this.wasManualAim = false;
+    this.input.cancelPointer();
   }
 
   // V5：继续深入时提供高风险契约选择（搜打撤赌注）
@@ -246,7 +447,7 @@ export class Game {
       } else {
         this.hud.showToast('继续深入……更危险，也更富有');
       }
-      this.state = 'moving';
+      this.openRouteChoice('继续深入……选择下一条路线');
     }, true, '🩸 深入契约', '强力增益+永久代价，可婉拒');
   }
 
@@ -331,19 +532,101 @@ export class Game {
     this.hud.setupWeapons(list.map((w) => ({ icon: w.icon, name: w.name })), this.player.weaponIndex);
   }
 
-  // 助手·夜枭：群体电击（触屏按钮 / 键4 共用）
+  // 助手·夜枭：主动 AOE 电击（触屏按钮 / E 键共用）
   private useSkill(): void {
     if (!this.assistant) return;
-    const ok = this.assistant.zapAll(this.zombies.zombies, this.scene, this.audio, (z: Zombie) => {
-      const result = z.takeDamage(25, 'body');
-      this.hud.floatText(z.mesh.position.clone().setY(1.4), `${result.dmg}`, 'dmg');
-      if (result.killed) this.onKill(z);
-    });
+    const dmg = this.assistantSkillDamage();
+    const ok = this.assistant.castAoe(this.assistantAoeTargets(dmg), this.scene, this.audio);
     if (ok) {
-      this.hud.showToast('🦉 夜枭·群体电击！');
+      this.hud.showToast(`🦉 夜枭·雷暴！范围伤害 ${dmg}`);
       this.hud.updateSkill(true, this.assistant.charges);
     } else if (this.assistant.charges <= 0) {
       this.hud.showToast('🦉 技能次数已用尽');
+    } else {
+      this.hud.showToast('🦉 范围内没有目标');
+    }
+  }
+
+  private assistantAutoDamage(): number {
+    return Math.round(Math.min(18, 8 + Math.floor(this.dungeon.currentDepth / 8)) * this.assistantDamageMult);
+  }
+
+  private assistantSkillDamage(): number {
+    return Math.round(Math.min(60, 32 + Math.floor(this.dungeon.currentDepth / 4)) * this.assistantDamageMult);
+  }
+
+  private assistantAoeTargets(dmg: number): AssistantTarget[] {
+    const targets: AssistantTarget[] = [];
+    for (const z of this.zombies.zombies) {
+      if (z.dead) continue;
+      const pos = z.mesh.position.clone().setY(z.mesh.position.y + 1.1);
+      targets.push({
+        position: pos,
+        hit: () => {
+          const result = z.takeDamage(dmg, 'body');
+          this.hud.floatText(pos.clone(), `${result.dmg}`, 'dmg');
+          if (result.killed) this.onKill(z);
+        },
+      });
+    }
+    if (this.boss && !this.boss.dead) {
+      const pos = this.boss.mesh.position.clone().setY(this.boss.mesh.position.y + 3);
+      targets.push({
+        position: pos,
+        hit: () => {
+          const result = this.boss!.takeDamage(dmg, 'body');
+          this.syncBossBar();
+          this.hud.floatText(pos.clone(), `${result.dmg}`, 'dmg');
+          if (result.killed) this.onBossKilled();
+        },
+      });
+    }
+    return targets;
+  }
+
+  private updateAssistantAutoAttack(): void {
+    if (!this.assistant || this.state !== 'combat' || !this.assistant.readyAutoAttack()) return;
+    let targetZombie: Zombie | null = null;
+    let targetBoss: TombBoss | null = null;
+    let targetPos: THREE.Vector3 | null = null;
+    let best = Infinity;
+    const origin = this.assistant.mesh.position;
+
+    for (const z of this.zombies.zombies) {
+      if (z.dead) continue;
+      const pos = z.mesh.position.clone().setY(z.mesh.position.y + 1.1);
+      const d = pos.distanceTo(origin);
+      if (d <= this.assistant.autoAttackRange && d < best) {
+        best = d;
+        targetZombie = z;
+        targetBoss = null;
+        targetPos = pos;
+      }
+    }
+
+    if (this.boss && !this.boss.dead) {
+      const pos = this.boss.mesh.position.clone().setY(this.boss.mesh.position.y + 3);
+      const d = pos.distanceTo(origin);
+      if (d <= this.assistant.autoAttackRange && d < best) {
+        best = d;
+        targetZombie = null;
+        targetBoss = this.boss;
+        targetPos = pos;
+      }
+    }
+
+    if (!targetPos) return;
+    const dmg = this.assistantAutoDamage();
+    this.assistant.fireAutoAttack(this.scene, this.audio, targetPos);
+    if (targetZombie) {
+      const result = targetZombie.takeDamage(dmg, 'body');
+      this.hud.floatText(targetPos.clone(), `${result.dmg}`, 'dmg');
+      if (result.killed) this.onKill(targetZombie);
+    } else if (targetBoss) {
+      const result = targetBoss.takeDamage(dmg, 'body');
+      this.syncBossBar();
+      this.hud.floatText(targetPos.clone(), `${result.dmg}`, 'dmg');
+      if (result.killed) this.onBossKilled();
     }
   }
 
@@ -391,9 +674,25 @@ export class Game {
     }
     if (this.boss && !this.boss.dead && this.boss.mesh.position.distanceTo(point) < 5) {
       const result = this.boss.takeDamage(60, 'body');
+      this.syncBossBar();
       this.hud.floatText(this.boss.mesh.position.clone().setY(3), `${result.dmg}`, 'dmg');
       if (result.killed) this.onBossKilled();
     }
+  }
+
+  private syncBossBar(): void {
+    if (!this.boss) return;
+    this.hud.updateBossBar(this.boss.hp, this.boss.maxHp, this.boss.phase);
+  }
+
+  private applyMonsterDamage(amount: number): { hpLost: number; shieldLost: number } {
+    const result = this.player.takeMonsterDamage(amount);
+    this.hud.floatText(
+      this.player.position.clone().setY(2.0),
+      result.shieldLost > 0 ? `🛡 -${result.shieldLost}` : `-${result.hpLost || Math.ceil(amount)}`,
+      result.shieldLost > 0 ? 'sanity' : 'head'
+    );
+    return result;
   }
 
   private onKill(z: Zombie): void {
@@ -452,7 +751,15 @@ export class Game {
     this.hud.logPickup('💰', '金币', orb.gold, '#ffd24d');
     this.scene.remove(orb.mesh);
     this.lootOrbs.splice(idx, 1);
+    this.maybeFinishPendingLoot();
     return true;
+  }
+
+  private maybeFinishPendingLoot(): void {
+    if (!this.pendingRouteMessage || this.lootOrbs.length > 0) return;
+    const message = this.pendingRouteMessage;
+    this.pendingRouteMessage = null;
+    this.completeNode(message);
   }
 
   // 点击祭坛/篝火交互（门口停下，点完再继续）
@@ -505,10 +812,10 @@ export class Game {
     const cratesDone = room.crates.every((c) => c.userData.searched);
     const fireDone = room.pickups.every((p) => p.userData.taken);
     if (cratesDone && fireDone) {
-      this.finishSearch();
-      this.hud.showToast('🏕️ 休整完毕，前往下一房间');
+      this.completeNode('🏕️ 休整完毕，打开地图选择下一关');
     } else if (!fireDone) {
-      this.hud.setPrompt('补给已搜完，点击篝火休整后前进');
+      this.enableRouteChoiceFromMap();
+      this.hud.setPrompt('补给已搜完，可点击篝火休整；也可打开地图直接前往下一关');
     }
   }
 
@@ -519,7 +826,7 @@ export class Game {
     this.hud.showPactChoice(curses, (p: Pact | null) => {
       if (p) this.applyBuff(p);
       else this.hud.showToast('你拒绝了祭坛的低语');
-      this.state = 'moving';
+      this.completeNode('祭坛低语散去，打开地图选择下一关');
     }, true, '😈 诅咒祭坛', '以代价换强力增益，或婉拒');
   }
 
@@ -529,6 +836,7 @@ export class Game {
     // 头脑冷静最多 3 层，达上限后不再出现
     let pool = BLESSINGS.slice();
     if (this.sanityReduce >= 3) pool = pool.filter((b) => b.id !== 'bless_calm');
+    if (!this.assistant) pool = pool.filter((b) => b.id !== 'bless_owl_fury');
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -539,7 +847,7 @@ export class Game {
         this.applyBuff(p);
         this.hud.showToast(`😇 祝福祭坛「${p.name}」：${p.boon}`);
       }
-      this.state = 'moving';
+      this.completeNode('祝福已生效，打开地图选择下一关');
     }, false, '😇 祝福祭坛', '三选一，获得纯增益');  // 不可婉拒，必选其一
   }
 
@@ -555,8 +863,9 @@ export class Game {
       case 'bless_calm': this.sanityReduce = Math.min(3, this.sanityReduce + 1); break;
       case 'bless_reaper': this.reaperHeal = true; break;
       case 'bless_marksman': this.player.headshotMult += 0.10; break;
+      case 'bless_owl_fury': this.assistantDamageMult += 0.25; break;
       case 'curse_san': this.player.damageMult += 0.25; this.player.sanity = Math.max(0, this.player.sanity - 20); break;
-      case 'curse_hp': this.lootValueMult += 0.30; this.player.takeDamage(25); break;
+      case 'curse_hp': this.lootValueMult += 0.30; this.player.spendHp(25); break;
       case 'curse_sancap': this.player.dmgTakenMult = Math.max(0.5, this.player.dmgTakenMult - 0.15); this.player.maxSanity = Math.max(10, this.player.maxSanity - 15); break;
       case 'curse_hpcap': this.player.walkSpeed *= 1.25; this.player.maxHp = Math.max(20, this.player.maxHp - 20); break;
     }
@@ -566,12 +875,12 @@ export class Game {
   }
 
   // ===== 商店（用局内金币结算）=====
-  private shopItems: { kind: string; icon: string; name: string; desc: string; price: number; sold?: boolean; payload?: Pact | WeaponDef | ConsumableKind }[] = [];
+  private shopItems: RunShopItem[] = [];
 
   private openShop(): void {
     this.shopItems = this.rollShopItems();
     this.hud.onShopBuy = (i: number) => this.buyShopItem(i);
-    this.hud.onShopClose = () => { this.state = 'moving'; };
+    this.hud.onShopClose = () => { this.completeNode('离开商店，打开地图选择下一关'); };
     this.hud.onShopRefresh = () => this.refreshShop();
     this.hud.showShop(this.shopItems, this.bag.coins);
   }
@@ -585,23 +894,30 @@ export class Game {
     this.hud.showShop(this.shopItems, this.bag.coins);
   }
 
-  private rollShopItems(): { kind: string; icon: string; name: string; desc: string; price: number; sold?: boolean; payload?: Pact | WeaponDef | ConsumableKind }[] {
+  private rollShopItems(): RunShopItem[] {
     const bless = rollBlessing();
-    const pool: { kind: string; icon: string; name: string; desc: string; price: number; payload?: Pact | WeaponDef | ConsumableKind }[] = [
+    const shieldItem: RunShopItem = Math.random() < 0.68
+      ? { kind: 'shield', icon: '🛡️', name: '护盾电池', desc: '补充 1 格本局护盾', price: 75 }
+      : { kind: 'shieldBig', icon: '🛡️', name: '重型护盾包', desc: '补充 2 格本局护盾', price: 130 };
+    const pool: RunShopItem[] = [
       { kind: 'med', icon: '🩹', name: '医疗包', desc: '+35 生命（入包）', price: 60, payload: 'med' },
       { kind: 'sedative', icon: '💊', name: '镇静剂', desc: '+15 神智（入包）', price: 50, payload: 'sedative' },
+      { kind: 'honey', icon: '🍯', name: '野蜂蜜', desc: '生命+10 / 神智+15（入包）', price: 65, payload: 'honey' },
+      { kind: 'adren', icon: '💉', name: '肾上腺素', desc: '临时续航，3房后衰减（入包）', price: 110, payload: 'adren' },
+      { kind: 'osiris', icon: '🫙', name: '奥西里斯之脂', desc: '生命+35 / 神智-20（入包）', price: 85, payload: 'osiris' },
       { kind: 'grenade', icon: '💣', name: '手雷', desc: '范围爆炸（入包）', price: 70, payload: 'grenade' },
       { kind: 'ammoR', icon: '🔹', name: '步枪弹 ×60', desc: '补充步枪弹', price: 50 },
-      { kind: 'weapon', icon: '💥', name: '霰弹枪', desc: '近距高伤武器', price: 320,
-        payload: { name: '霰弹枪', icon: '💥', damage: 7, magSize: 6, reloadTime: 1.8, fireInterval: 0.8, pellets: 6, spread: 0.05, cellsW: 2, cellsH: 2, ammoType: 'shell' } },
       { kind: 'blessing', icon: '😇', name: `祝福·${bless.name}`, desc: `${bless.boon}${bless.curse ? '（代价 ' + bless.curse + '）' : ''}`, price: 200, payload: bless },
     ];
-    // 随机抽 3 个
+    if (this.player.weapons.some((w) => w.ammoType === 'shell')) {
+      pool.push({ kind: 'ammoS', icon: '🔴', name: '霰弹 ×24', desc: '补充霰弹弹药', price: 70 });
+    }
+    // 固定 1 个防御商品 + 随机 3 个局内补给/临时增益
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
     }
-    return pool.slice(0, 3);
+    return [shieldItem, ...pool.slice(0, 3)];
   }
 
   private buyShopItem(i: number): void {
@@ -609,12 +925,23 @@ export class Game {
     if (!it || it.sold) return;
     if (this.bag.coins < it.price) { this.hud.showToast('💰 局内金币不足'); return; }
     let ok = true;
-    if (it.kind === 'med' || it.kind === 'sedative' || it.kind === 'grenade') {
+    if (it.kind === 'med' || it.kind === 'sedative' || it.kind === 'grenade' ||
+        it.kind === 'honey' || it.kind === 'adren' || it.kind === 'osiris') {
       ok = this.bag.addConsumable(it.payload as ConsumableKind);
     } else if (it.kind === 'ammoR') {
       this.bag.addBulletsOf('rifle', 60);
-    } else if (it.kind === 'weapon') {
-      ok = this.bag.addItem(makeWeaponItem(it.payload as WeaponDef));
+    } else if (it.kind === 'ammoS') {
+      this.bag.addBulletsOf('shell', 24);
+    } else if (it.kind === 'shield') {
+      if (this.player.addShieldUnits(1) <= 0) {
+        this.hud.showToast('🛡️ 护盾已满');
+        return;
+      }
+    } else if (it.kind === 'shieldBig') {
+      if (this.player.addShieldUnits(2) <= 0) {
+        this.hud.showToast('🛡️ 护盾已满');
+        return;
+      }
     } else if (it.kind === 'blessing') {
       this.applyBuff(it.payload as Pact);
     }
@@ -785,6 +1112,7 @@ export class Game {
         if (result.killed) { this.onKill(target.z); break; }
       } else if (target.boss && !target.boss.dead) {
         const result = target.boss.takeDamage(dmg, 'body');
+        this.syncBossBar();
         this.hud.showHitmarker(false);
         this.hud.floatText(end, `${result.dmg}`, 'dmg');
         this.audio.hit();
@@ -832,6 +1160,7 @@ export class Game {
         const dmg = Math.round(this.player.baseDamage * this.player.damageMult * hsMult);
         if (obj.userData.boss) {
           const result = (obj.userData.boss as TombBoss).takeDamage(dmg, part);
+          this.syncBossBar();
           this.hud.showHitmarker(result.headshot);
           this.hud.floatText(hits[0].point, `${result.dmg}`, result.headshot ? 'head' : 'dmg');
           if (result.headshot) this.audio.headshot();
@@ -868,8 +1197,7 @@ export class Game {
     this.hud.hideSearchPanel();
     this.hud.hideSearchRing();
     this.searchTarget = null;
-    this.state = 'moving';
-    this.hud.setPrompt(null);
+    this.completeNode('搜刮结束，打开地图选择下一关');
   }
 
   // 战斗房清场后激活战利品箱高亮（变为可搜索）
@@ -881,7 +1209,7 @@ export class Game {
     }
   }
 
-  private onEnterRoom(room: Room): void {
+  private onEnterRoom(room: Room): boolean {
     this.enteredDepth = room.depth;
     // 肾上腺素衰减：之后3个房间各 -10 生命/理智
     if (this.adrenalineRooms > 0) {
@@ -899,10 +1227,9 @@ export class Game {
       this.hud.showIntel(
         `<b style="color:#ffd24d; font-size:19px">${theme.name}</b><br><br>${theme.story}`
       );
+      return false;
     }
-    if (!this.pendingChoice && room.depth >= this.dungeon.currentDepth) {
-      this.appendNext();
-    }
+    return true;
   }
 
   private onRoomCenter(room: Room): void {
@@ -939,22 +1266,21 @@ export class Game {
         chapter
       );
       this.boss.onSpit = (origin: THREE.Vector3) => this.spawnEnemyShot(origin);
-      this.boss.onSummon = (pos: THREE.Vector3) => {
-        this.zombies.spawn(pos, room.depth, 'normal');
-      };
       this.hud.showBossBar(`👹 ${this.boss.name}`);
-      this.audio.bossRoar();
       this.state = 'combat';
+      this.audio.bossRoar();
     } else if (room.type === 'curse') {
       // 门口停下，点击恶魔祭坛抉择后再继续
       this.state = 'interact';
-      this.hud.setPrompt('点击发光的诅咒祭坛抉择');
+      this.enableRouteChoiceFromMap();
+      this.hud.setPrompt('点击发光的诅咒祭坛抉择；也可打开地图直接前往下一关');
     } else if (room.type === 'safehouse') {
-      // 无怪：篝火与补给立即可交互（无需先点篝火），完成后点"继续前进"选择房间
+      // 无怪：篝火与补给立即可交互，完成后打开地图选择下一关
       if (room.crates.length) this.activateRoomLoot(room);
       this.state = 'search';
-      this.hud.setPrompt('点击篝火回理智、搜刮补给，完成后点"继续前进"');
-      this.hud.showSearchPanel('安全屋：点击篝火/补给，或继续前进');
+      this.enableRouteChoiceFromMap();
+      this.hud.setPrompt('点击篝火回理智、搜刮补给；也可打开地图直接前往下一关');
+      this.hud.showSearchPanel('安全屋：搜刮或打开地图前进');
     } else if (room.type === 'shop') {
       this.state = 'shop';
       this.openShop();
@@ -965,9 +1291,21 @@ export class Game {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     const time = this.clock.elapsedTime;
 
-    // 打开背包 / 暂停按钮：仅渲染，冻结一切模拟
-    if (this.paused || this.userPaused) {
+    if (this.transitioning) {
+      this.updateRouteTransition(dt);
       this.renderer.render(this.scene, this.camera);
+      this.input.endFrame();
+      return;
+    }
+
+    if (this.input.wasPressed('Backquote')) {
+      this.toggleDebugRouteMode();
+    }
+
+    // 打开背包 / 暂停按钮 / 路线图：仅渲染，冻结一切模拟
+    if (this.paused || this.userPaused || this.routePaused) {
+      this.renderer.render(this.scene, this.camera);
+      this.input.endFrame();
       return;
     }
 
@@ -1010,19 +1348,20 @@ export class Game {
     const goneOrbs = this.lootOrbs.filter((o) => o.mesh.position.z > this.player.position.z + 7);
     for (const o of goneOrbs) this.scene.remove(o.mesh);
     this.lootOrbs = this.lootOrbs.filter((o) => o.mesh.position.z <= this.player.position.z + 7);
+    this.maybeFinishPendingLoot();
 
     if (this.state !== 'over') {
+      const blocked = this.state === 'intel' || this.state === 'shop' || this.state === 'choice' || this.state === 'extract';
       if (this.input.wasPressed('KeyR')) this.tryReload();
+      if (this.input.wasPressed('KeyE') && this.assistant && !blocked) this.useSkill();
       if (this.input.wasPressed('KeyQ')) {
         this.player.switchWeapon(this.audio);
         this.hud.setWeaponSelected(this.player.weaponIndex);
       }
-      if (this.input.wasPressed('Digit1')) this.useConsumable('med');
-      if (this.input.wasPressed('Digit2')) this.useConsumable('sedative');
+      if (this.input.wasPressed('Digit1')) this.useConsumable(this.hud.getQuickConsumable(0));
+      if (this.input.wasPressed('Digit2')) this.useConsumable(this.hud.getQuickConsumable(1));
       if (this.input.wasPressed('Digit3')) this.useConsumable('grenade');
-      if (this.input.wasPressed('Digit4')) this.useSkill();
 
-      const blocked = this.state === 'intel' || this.state === 'shop' || this.state === 'choice' || this.state === 'extract';
       // V6：长按进入手动 ADS（含搜索房；短按仍用于点击箱子，靠 0.15s 阈值区分）
       const manualAim = !blocked && this.player.alive && this.input.isAiming();
       // 瞄准时暂停自动前进，避免操控/旋转时角色仍向前漂移
@@ -1060,33 +1399,13 @@ export class Game {
 
       if (this.assistant) {
         this.assistant.update(dt, time, this.player.position, this.scene);
-      }
-
-      const room = this.roomAt(this.player.position.z);
-      if (room) {
-        this.currentRoom = room;
-        if (room.depth > this.enteredDepth) this.onEnterRoom(room);
-        if (
-          this.state === 'moving' &&
-          room.depth > this.triggeredDepth &&
-          this.player.position.z <= room.zEntry - 6   // 更靠近房门处停下（交互物均在前方，镜头不转）
-        ) {
-          this.onRoomCenter(room);
-        }
-        if (
-          this.state === 'moving' && this.pendingChoice &&
-          room.depth >= this.dungeon.currentDepth &&
-          this.player.position.z <= room.zExit + 1.6
-        ) {
-          this.state = 'choice';
-          this.hud.showChoice(this.pendingChoice, this.dungeon.currentDepth + 1, this.sanityReduce);
-        }
+        if (!blocked) this.updateAssistantAutoAttack();
       }
 
       if (!blocked && (this.state === 'combat' || this.zombies.zombies.length > 0)) {
         const hits = this.zombies.update(dt, time, this.player.position, this.audio);
         for (let i = 0; i < hits.hpHits; i++) {
-          this.player.takeDamage(8 + Math.floor(this.dungeon.currentDepth / 4));
+          this.applyMonsterDamage(8 + Math.floor(this.dungeon.currentDepth / 4));
         }
         for (let i = 0; i < hits.sanityHits; i++) {
           this.player.sanity = Math.max(0, this.player.sanity - 6);
@@ -1107,7 +1426,8 @@ export class Game {
             this.hud.updateBossBar(this.boss.hp, this.boss.maxHp, this.boss.phase);
           }
           for (let i = 0; i < bossHits; i++) {
-            this.player.takeDamage(22);
+            const dmg = 22;
+            this.applyMonsterDamage(dmg);
           }
           if (this.boss.removed) {
             this.boss.dispose(this.scene);
@@ -1126,18 +1446,19 @@ export class Game {
               // 神之祝福：清场后在前方圆台激活可点击特效，点击领取
               this.revealBlessing(room);
               this.state = 'interact';
+              this.enableRouteChoiceFromMap();
               this.hud.showToast('😇 精英已伏诛！点击圆台上的祝福光环领取');
-              this.hud.setPrompt('点击圆台上的金色光环领取祝福');
+              this.hud.setPrompt('点击圆台上的金色光环领取祝福；也可打开地图直接前往下一关');
             } else if (room && room.crates.some((c) => !c.userData.searched)) {
               // 补给/宝石：清场后揭示战利品箱可搜
               this.activateRoomLoot(room);
               this.state = 'search';
+              this.enableRouteChoiceFromMap();
               this.hud.showToast('✅ 区域已清空，可搜刮发光的战利品箱');
-              this.hud.setPrompt('点击发光的箱子搜刮，或点"继续前进"');
-              this.hud.showSearchPanel('点击发光的箱子搜索');
+              this.hud.setPrompt('点击发光的箱子搜刮；也可打开地图直接前往下一关');
+              this.hud.showSearchPanel('搜刮箱子，或打开地图前进');
             } else {
-              this.state = 'moving';
-              this.hud.showToast('✅ 区域安全，继续前进');
+              this.completeNode('✅ 区域安全，打开地图选择下一关');
             }
           }
         }
@@ -1152,7 +1473,8 @@ export class Game {
         );
         if (d < 0.6) {
           s.dead = true;
-          this.player.takeDamage(7 + Math.floor(this.dungeon.currentDepth / 5));
+          const dmg = 7 + Math.floor(this.dungeon.currentDepth / 5);
+          this.applyMonsterDamage(dmg);
           this.audio.hit();
         }
       }
@@ -1221,10 +1543,10 @@ export class Game {
                   this.maybeFinishSafehouse();   // 安全屋需搜完且点过篝火
                 } else {
                   this.finishSearch();
-                  this.hud.showToast('箱子已搜空，继续前进');
                 }
               } else {
-                this.hud.showSearchPanel('点击下一个发光箱子，或继续前进');
+                this.enableRouteChoiceFromMap();
+                this.hud.showSearchPanel('点击下一个发光箱子，或打开地图前进');
               }
             } else {
               this.hud.hideSearchPanel();
@@ -1240,7 +1562,7 @@ export class Game {
     this.input.endFrame();
 
     this.hud.update(
-      dt, this.player.hp, this.player.maxHp,
+      dt, this.player.hp, this.player.maxHp, this.player.shieldCount, this.player.maxShieldCount,
       this.player.sanity, this.player.maxSanity,
       this.player.ammo, this.player.magSize, this.player.reloading, this.player.reloadTime,
       this.bag.totalValue, this.dungeon.currentDepth,

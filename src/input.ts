@@ -88,6 +88,11 @@ export class Input {
     return c;
   }
 
+  cancelPointer(): void {
+    this.clicked = false;
+    this.mouseDown = false;
+  }
+
   isFiring(): boolean {
     return this.mouseDown;
   }

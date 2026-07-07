@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { InvItem, rollSupplyContent, rollGemContent } from './items';
 
-// 房间类型（重构后只保留以下几类）
-export type RoomType = 'boss' | 'supply' | 'gem' | 'blessing' | 'curse' | 'safehouse' | 'shop';
+// 房间类型（corridor 只用于开局过渡，不进入路线图）
+export type RoomType = 'corridor' | 'boss' | 'supply' | 'gem' | 'blessing' | 'curse' | 'safehouse' | 'shop';
 
 // 章节主题（策划案"世界观"：金字塔/玛雅神庙/秦始皇陵）
 export interface Theme {
@@ -36,14 +36,48 @@ export function themeForDepth(depth: number): Theme {
 }
 
 export const ROOM_INFO: Record<string, { name: string; icon: string; hint: string }> = {
+  corridor: { name: '入口回廊', icon: '🚪', hint: '进入古墓前的过渡区域' },
   supply:   { name: '补给之屋', icon: '🧰', hint: '清怪后可搜刮药品/弹药' },
   gem:      { name: '宝藏之屋', icon: '💎', hint: '清怪后可搜刮宝藏' },
   blessing: { name: '祝福祭坛', icon: '😇', hint: '精英镇守，击败后三选一纯增益' },
   curse:    { name: '诅咒祭坛', icon: '😈', hint: '祭坛抉择：以代价换强力增益' },
   safehouse:{ name: '安全屋', icon: '🏕️', hint: '点击篝火回理智，或有补给' },
-  shop:     { name: '商店', icon: '🛒', hint: '花金币购买道具' },
+  shop:     { name: '局内商店', icon: '🛒', hint: '花局内金币购买本局补给' },
   boss:     { name: 'BOSS·撤离点', icon: '👹', hint: '本章主宰，击败后可撤离' },
 };
+
+export interface RouteNode {
+  id: string;
+  type: RoomType;
+  floor: number;
+  lane: number;
+  depth: number;
+  links: string[];
+  visited: boolean;
+  risk: string;
+  reward: string;
+}
+
+export interface RouteMapSnapshot {
+  nodes: RouteNode[];
+  currentId: string | null;
+  choiceIds: string[];
+  floors: number;
+  lanes: number;
+  segmentStartDepth: number;
+  segmentEndDepth: number;
+}
+
+interface RouteMapCandidate {
+  nodes: RouteNode[];
+  fairness: number;
+  routeCount: number;
+}
+
+interface RouteProfile {
+  vector: number[];
+  routeCount: number;
+}
 
 export interface Room {
   type: RoomType;
@@ -150,6 +184,15 @@ export class Dungeon {
   private nextZ: number = 0; // 下一个房间入口z
   private depthCount: number = 0;
   private lastShopDepth: number = -10;  // 上一个商店所在深度（控制间隔）
+  private routeNodes: RouteNode[] = [];
+  private routeCurrentId: string | null = null;
+  private routeSegmentStartDepth: number = 0;
+  private routeSegmentIndex: number = 0;
+  private readonly routeRoomsPerSegment: number = 10;
+  private readonly routeFloors: number = 11;
+  private readonly routeLanes: number = 3;
+  private readonly routeRestFloor: number = 6;
+  private readonly routeFixedLane: number = 1;
 
   constructor(scene: THREE.Scene, startDepth: number = 0) {
     this.scene = scene;
@@ -160,27 +203,410 @@ export class Dungeon {
     return this.depthCount;
   }
 
-  // 决定下一房间候选
-  nextOptions(): RoomType[] {
-    const d = this.depthCount + 1;
-    if (d % 30 === 0) return ['boss'];        // 章节BOSS=撤离点
-    if (d % 30 === 29) return ['shop'];       // BOSS 前必有商店
-    if (d % 10 === 5) return ['safehouse'];   // 周期安全屋
-    // 其余普通房：补给/宝石/祝福为常规候选；诅咒(25%)小概率进入候选池
-    const pool: RoomType[] = ['supply', 'gem', 'blessing'];
-    if (Math.random() < 0.25) pool.push('curse');
-    // 商店：前5个房间不刷；距上一个商店至少 5 个房间；满足时 35% 进入候选
-    if (d > 5 && (d - this.lastShopDepth) >= 5 && Math.random() < 0.35) pool.push('shop');
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
-    const count = Math.random() < 0.5 ? 2 : 3;
-    return pool.slice(0, Math.min(count, pool.length));
+  // 参考杀戮尖塔：每段 10 节，3 条主路线，少量横向连线，终点为 BOSS/撤离点。
+  nextChoices(): RouteNode[] {
+    this.ensureRouteMap();
+    return this.availableRouteChoices();
   }
 
-  append(type: RoomType): Room {
-    this.depthCount += 1;
+  routeSnapshot(): RouteMapSnapshot {
+    this.ensureRouteMap();
+    const choices = this.peekRouteChoices().map((n) => n.id);
+    return {
+      nodes: this.routeNodes.map((n) => ({
+        ...n,
+        links: n.links.slice(),
+      })),
+      currentId: this.routeCurrentId,
+      choiceIds: choices,
+      floors: this.routeFloors,
+      lanes: this.routeLanes,
+      segmentStartDepth: this.routeSegmentStartDepth,
+      segmentEndDepth: this.routeSegmentStartDepth + this.routeRoomsPerSegment,
+    };
+  }
+
+  appendEntrance(): Room {
+    return this.append('corridor', false);
+  }
+
+  appendRouteNode(node: RouteNode, matchNodeDepth: boolean = false): Room {
+    const live = this.routeNodes.find((n) => n.id === node.id);
+    if (!live) {
+      if (matchNodeDepth) this.depthCount = Math.max(0, node.depth - 1);
+      return this.append(node.type);
+    }
+    if (matchNodeDepth) this.depthCount = Math.max(0, live.depth - 1);
+    live.visited = true;
+    this.routeCurrentId = live.id;
+    return this.append(live.type);
+  }
+
+  private availableRouteChoices(): RouteNode[] {
+    if (this.routeCurrentId === null) return this.startRouteChoices();
+    const current = this.routeNodes.find((n) => n.id === this.routeCurrentId);
+    if (!current || current.links.length === 0) {
+      this.generateRouteMap();
+      return this.startRouteChoices();
+    }
+    return current.links
+      .map((id) => this.routeNodes.find((n) => n.id === id))
+      .filter((n): n is RouteNode => !!n);
+  }
+
+  private peekRouteChoices(): RouteNode[] {
+    if (this.routeCurrentId === null) return this.startRouteChoices();
+    const current = this.routeNodes.find((n) => n.id === this.routeCurrentId);
+    if (!current || current.links.length === 0) return [];
+    return current.links
+      .map((id) => this.routeNodes.find((n) => n.id === id))
+      .filter((n): n is RouteNode => !!n);
+  }
+
+  private startRouteChoices(): RouteNode[] {
+    const start = this.routeNodes.find((n) => n.type === 'corridor' && n.floor === 1);
+    if (!start) return [];
+    return start.links
+      .map((id) => this.routeNodes.find((n) => n.id === id))
+      .filter((n): n is RouteNode => !!n);
+  }
+
+  private ensureRouteMap(): void {
+    if (this.routeNodes.length === 0) this.generateRouteMap();
+  }
+
+  private generateRouteMap(): void {
+    this.routeSegmentIndex += 1;
+    this.routeSegmentStartDepth = this.depthCount;
+    let best: RouteMapCandidate | null = null;
+    for (let i = 0; i < 120; i++) {
+      const candidate = this.buildRouteCandidate();
+      if (!best || candidate.fairness < best.fairness) best = candidate;
+    }
+
+    this.routeNodes = best ? best.nodes : this.buildRouteCandidate().nodes;
+    const start = this.routeNodes.find((n) => n.type === 'corridor' && n.floor === 1);
+    this.routeCurrentId = start ? start.id : null;
+  }
+
+  private buildRouteCandidate(): RouteMapCandidate {
+    const nodes: RouteNode[] = [];
+    const addNode = (id: string, floor: number, lane: number, type: RoomType, visited: boolean = false): RouteNode => {
+      const depth = this.routeDepthForFloor(floor);
+      const node: RouteNode = {
+        id,
+        type,
+        floor,
+        lane,
+        depth,
+        links: [],
+        visited,
+        risk: this.routeRisk(type),
+        reward: this.routeReward(type),
+      };
+      nodes.push(node);
+      return node;
+    };
+
+    const segment = this.routeSegmentIndex;
+    const start = addNode(`r${segment}-start`, 1, this.routeFixedLane, 'corridor', true);
+    const rest = addNode(`r${segment}-rest`, this.routeRestFloor, this.routeFixedLane, 'safehouse');
+    const boss = addNode(`r${segment}-boss`, this.routeFloors, this.routeFixedLane, 'boss');
+
+    for (let floor = 2; floor < this.routeFloors; floor++) {
+      if (floor === this.routeRestFloor) continue;
+      if (floor === this.routeFloors - 1) {
+        addNode(`r${segment}-boss-shop`, floor, this.routeFixedLane, 'shop');
+        continue;
+      }
+      const floorTypes = this.rollRouteFloorTypes(floor);
+      for (let lane = 0; lane < this.routeLanes; lane++) {
+        addNode(`r${segment}-${floor}-${lane}`, floor, lane, floorTypes[lane]);
+      }
+    }
+
+    const byFloor = (floor: number): RouteNode[] =>
+      nodes.filter((n) => n.floor === floor).sort((a, b) => a.lane - b.lane);
+    const link = (from: RouteNode, to: RouteNode): void => {
+      if (!from.links.includes(to.id)) from.links.push(to.id);
+    };
+    const linkAll = (from: RouteNode, targets: RouteNode[]): void => {
+      for (const target of targets) link(from, target);
+    };
+    const linkAllToFixed = (fromFloor: number, target: RouteNode): void => {
+      for (const node of byFloor(fromFloor)) link(node, target);
+    };
+
+    linkAll(start, byFloor(2));
+    for (let floor = 2; floor < this.routeRestFloor - 1; floor++) {
+      this.wireRandomFloor(nodes, floor, floor + 1);
+    }
+    linkAllToFixed(this.routeRestFloor - 1, rest);
+    linkAll(rest, byFloor(this.routeRestFloor + 1));
+    for (let floor = this.routeRestFloor + 1; floor < this.routeFloors - 1; floor++) {
+      this.wireRandomFloor(nodes, floor, floor + 1);
+    }
+    linkAllToFixed(this.routeFloors - 1, boss);
+
+    return this.evaluateRouteCandidate(nodes);
+  }
+
+  private wireRandomFloor(nodes: RouteNode[], fromFloor: number, toFloor: number): void {
+    const fromNodes = nodes.filter((n) => n.floor === fromFloor).sort((a, b) => a.lane - b.lane);
+    const targetNodes = nodes.filter((n) => n.floor === toFloor).sort((a, b) => a.lane - b.lane);
+    if (fromNodes.length === 0 || targetNodes.length === 0) return;
+
+    const byLane = (lane: number): RouteNode =>
+      targetNodes.slice().sort((a, b) => Math.abs(a.lane - lane) - Math.abs(b.lane - lane))[0];
+    const link = (from: RouteNode, to: RouteNode): void => {
+      if (!from.links.includes(to.id)) from.links.push(to.id);
+    };
+
+    for (const from of fromNodes) {
+      link(from, byLane(from.lane));
+      if (Math.random() < 0.58) {
+        const dir = from.lane === 0 ? 1 : from.lane === this.routeLanes - 1 ? -1 : (Math.random() < 0.5 ? -1 : 1);
+        link(from, byLane(from.lane + dir));
+      }
+      if (Math.random() < 0.16) {
+        link(from, targetNodes[Math.floor(Math.random() * targetNodes.length)]);
+      }
+    }
+
+    for (const target of targetNodes) {
+      const hasIncoming = fromNodes.some((from) => from.links.includes(target.id));
+      if (hasIncoming) continue;
+      const donor = fromNodes.slice().sort((a, b) => {
+        const laneDelta = Math.abs(a.lane - target.lane) - Math.abs(b.lane - target.lane);
+        return laneDelta !== 0 ? laneDelta : a.links.length - b.links.length;
+      })[0];
+      link(donor, target);
+    }
+  }
+
+  private routeDepthForFloor(floor: number): number {
+    if (floor <= 1) return this.routeSegmentStartDepth;
+    return this.routeSegmentStartDepth + Math.min(this.routeRoomsPerSegment, floor - 1);
+  }
+
+  private rollRouteFloorTypes(floor: number): RoomType[] {
+    const depth = this.routeDepthForFloor(floor);
+    const requireAllDifferent = floor === 2;
+    let best: RoomType[] = [];
+    for (let i = 0; i < 12; i++) {
+      const types = Array.from({ length: this.routeLanes }, () => this.rollRouteType(floor, depth));
+      const unique = new Set(types).size;
+      if (requireAllDifferent ? unique === this.routeLanes : unique >= 2) return types;
+      if (unique > new Set(best).size) best = types;
+    }
+    if (new Set(best).size >= 2) return best;
+
+    const fallback: RoomType[] = floor <= 3
+      ? ['supply', 'gem', 'blessing']
+      : ['supply', 'gem', depth >= 6 ? 'shop' : 'blessing'];
+    return fallback.slice(0, this.routeLanes);
+  }
+
+  private rollRouteType(floor: number, depth: number): RoomType {
+    const weights: { type: RoomType; weight: number }[] = [
+      { type: 'supply', weight: floor <= 3 ? 38 : 28 },
+      { type: 'gem', weight: floor <= 3 ? 30 : 32 },
+      { type: 'blessing', weight: floor <= 3 ? 12 : 18 },
+    ];
+    if (depth >= 4) weights.push({ type: 'curse', weight: 12 });
+    if (depth >= 6 && (depth - this.lastShopDepth) >= 4) weights.push({ type: 'shop', weight: 10 });
+    const total = weights.reduce((sum, item) => sum + item.weight, 0);
+    let roll = Math.random() * total;
+    for (const item of weights) {
+      roll -= item.weight;
+      if (roll <= 0) return item.type;
+    }
+    return weights[weights.length - 1].type;
+  }
+
+  private evaluateRouteCandidate(nodes: RouteNode[]): RouteMapCandidate {
+    const scores = this.enumerateRouteScores(nodes);
+    if (scores.length === 0) return { nodes, fairness: Number.POSITIVE_INFINITY, routeCount: 0 };
+
+    const min = Math.min(...scores);
+    const max = Math.max(...scores);
+    const mean = scores.reduce((sum, s) => sum + s, 0) / scores.length;
+    const variance = scores.reduce((sum, s) => sum + (s - mean) * (s - mean), 0) / scores.length;
+    const std = Math.sqrt(variance);
+    const target = this.routeRoomsPerSegment * 12;
+    const routeCountPenalty = scores.length < 12 ? (12 - scores.length) * 15 : 0;
+    const typePenalty = this.routeTypeDiversityPenalty(nodes);
+    const choicePenalty = this.routeChoiceSimilarityPenalty(nodes);
+    const fairness = (max - min) * 5 + std * 3 + Math.abs(mean - target) * 0.7 + routeCountPenalty + typePenalty + choicePenalty;
+    return { nodes, fairness, routeCount: scores.length };
+  }
+
+  private enumerateRouteScores(nodes: RouteNode[]): number[] {
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const start = nodes.find((n) => n.type === 'corridor' && n.floor === 1);
+    const boss = nodes.find((n) => n.type === 'boss');
+    if (!start || !boss) return [];
+
+    const scores: number[] = [];
+    const visit = (node: RouteNode, score: number, guard: number): void => {
+      if (scores.length > 2000 || guard > this.routeFloors + 2) return;
+      const nextScore = score + this.routeNodeValue(node);
+      if (node.id === boss.id) {
+        scores.push(nextScore);
+        return;
+      }
+      for (const id of node.links) {
+        const next = byId.get(id);
+        if (next) visit(next, nextScore, guard + 1);
+      }
+    };
+    visit(start, 0, 0);
+    return scores;
+  }
+
+  private routeNodeValue(node: RouteNode): number {
+    const base: Record<RoomType, number> = {
+      corridor: 0,
+      supply: 10,
+      gem: 15,
+      blessing: 19,
+      curse: 17,
+      safehouse: 10,
+      shop: 12,
+      boss: 22,
+    };
+    const riskPenalty = Math.round(sanityCostFor(node.type, node.depth) * 0.35);
+    const cursePenalty = node.type === 'curse' ? 2 : 0;
+    return base[node.type] - riskPenalty - cursePenalty;
+  }
+
+  private routeTypeDiversityPenalty(nodes: RouteNode[]): number {
+    const dynamic = nodes.filter((n) => n.type !== 'corridor' && n.type !== 'safehouse' && n.type !== 'boss');
+    const counts = new Map<RoomType, number>();
+    for (const node of dynamic) counts.set(node.type, (counts.get(node.type) || 0) + 1);
+    const typeCount = counts.size;
+    const dominant = Math.max(...Array.from(counts.values())) / Math.max(1, dynamic.length);
+    return Math.max(0, dominant - 0.48) * 70 + (typeCount < 4 ? (4 - typeCount) * 10 : 0);
+  }
+
+  private routeChoiceSimilarityPenalty(nodes: RouteNode[]): number {
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    let penalty = 0;
+
+    for (const node of nodes) {
+      const targets = node.links
+        .map((id) => byId.get(id))
+        .filter((n): n is RouteNode => !!n);
+      if (targets.length <= 1) continue;
+
+      const uniqueTypes = new Set(targets.map((t) => t.type)).size;
+      if (uniqueTypes === 1) {
+        penalty += 900;
+      } else {
+        penalty += (targets.length - uniqueTypes) * 65;
+      }
+
+      const profiles = targets.map((target) => this.routeProfileFrom(target, nodes));
+      for (let i = 0; i < profiles.length; i++) {
+        for (let j = i + 1; j < profiles.length; j++) {
+          const distance = this.routeProfileDistance(profiles[i], profiles[j]);
+          if (distance < 1.35) penalty += (1.35 - distance) * 240;
+          if (distance < 0.85) penalty += 260;
+        }
+      }
+    }
+
+    return penalty;
+  }
+
+  private routeProfileFrom(start: RouteNode, nodes: RouteNode[]): RouteProfile {
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const boss = nodes.find((n) => n.type === 'boss');
+    const focusTypes: RoomType[] = ['supply', 'gem', 'blessing', 'curse', 'shop'];
+    if (!boss) return { vector: new Array(16).fill(0), routeCount: 0 };
+
+    const paths: RouteNode[][] = [];
+    const visit = (node: RouteNode, path: RouteNode[], guard: number): void => {
+      if (paths.length >= 600 || guard > this.routeFloors + 2) return;
+      const nextPath = path.concat(node);
+      if (node.id === boss.id) {
+        paths.push(nextPath);
+        return;
+      }
+      for (const id of node.links) {
+        const next = byId.get(id);
+        if (next) visit(next, nextPath, guard + 1);
+      }
+    };
+    visit(start, [], 0);
+
+    if (paths.length === 0) return { vector: new Array(16).fill(0), routeCount: 0 };
+
+    const scores = paths.map((path) => path.reduce((sum, node) => sum + this.routeNodeValue(node), 0));
+    const meanScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+    const minScore = Math.min(...scores);
+    const maxScore = Math.max(...scores);
+    const meanLength = paths.reduce((sum, path) => sum + path.length, 0) / paths.length;
+
+    const immediate = focusTypes.map((type) => start.type === type ? 2.5 : 0);
+    const typeRates = focusTypes.map((type) => {
+      let total = 0;
+      for (const path of paths) {
+        const dynamic = path.filter((node) => focusTypes.includes(node.type));
+        const count = dynamic.filter((node) => node.type === type).length;
+        total += count / Math.max(1, dynamic.length);
+      }
+      return (total / paths.length) * 4;
+    });
+
+    return {
+      vector: [
+        meanScore / 25,
+        minScore / 25,
+        maxScore / 25,
+        meanLength / 10,
+        ...immediate,
+        ...typeRates,
+        Math.min(2, paths.length / 10),
+      ],
+      routeCount: paths.length,
+    };
+  }
+
+  private routeProfileDistance(a: RouteProfile, b: RouteProfile): number {
+    const len = Math.max(a.vector.length, b.vector.length);
+    let distance = 0;
+    for (let i = 0; i < len; i++) {
+      distance += Math.abs((a.vector[i] || 0) - (b.vector[i] || 0));
+    }
+    distance += Math.abs(a.routeCount - b.routeCount) * 0.04;
+    return distance;
+  }
+
+  private routeRisk(type: RoomType): string {
+    if (type === 'corridor') return '入口';
+    if (type === 'boss') return '首领战';
+    if (type === 'blessing') return '精英镇守';
+    if (type === 'curse') return '代价抉择';
+    if (type === 'shop' || type === 'safehouse') return '安全节点';
+    if (type === 'gem') return '中等战斗';
+    return '低压战斗';
+  }
+
+  private routeReward(type: RoomType): string {
+    if (type === 'corridor') return '选择路径';
+    if (type === 'boss') return '圣物/撤离';
+    if (type === 'gem') return '高价值藏品';
+    if (type === 'supply') return '补给/弹药';
+    if (type === 'blessing') return '纯增益';
+    if (type === 'curse') return '强增益/代价';
+    if (type === 'safehouse') return '回复/检查点';
+    if (type === 'shop') return '购买补强';
+    return '继续深入';
+  }
+
+  append(type: RoomType, countDepth: boolean = true): Room {
+    if (countDepth) this.depthCount += 1;
     if (type === 'shop') this.lastShopDepth = this.depthCount;  // 记录商店深度（控制间隔）
     // 纵深加大（前后空间更大，左右宽度不变）
     const length = type === 'shop' ? 16 : type === 'curse' ? 16 : type === 'safehouse' ? 18 : type === 'boss' ? 34 : 24;

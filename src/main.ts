@@ -1,5 +1,5 @@
 import { Game } from './game';
-import { Meta } from './meta';
+import { Meta, HP_TRAINING_STEP, SANITY_TRAINING_STEP, RELOAD_TRAINING_MULT } from './meta';
 import { AudioFX } from './audio';
 import { TREASURES, RELICS } from './items';
 import { THEMES } from './rooms';
@@ -61,6 +61,67 @@ const meta = new Meta();
 const audio = new AudioFX();
 let selectedStart = 0;
 
+function ensureAudioStarted(): void {
+  audio.startAmbient();
+  audio.init();
+}
+
+document.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement | null;
+  const button = target?.closest('button') as HTMLButtonElement | null;
+  if (!button || button.disabled) return;
+  ensureAudioStarted();
+  audio.click();
+}, true);
+
+window.addEventListener('pointerdown', () => ensureAudioStarted(), true);
+window.addEventListener('keydown', () => ensureAudioStarted(), true);
+
+function volumeText(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function syncVolumeControls(): void {
+  const pairs = [
+    { slider: 'home-music-slider', label: 'home-music-val', value: audio.getMusicVolume() },
+    { slider: 'pause-music-slider', label: 'pause-music-val', value: audio.getMusicVolume() },
+    { slider: 'home-sfx-slider', label: 'home-sfx-val', value: audio.getSfxVolume() },
+    { slider: 'pause-sfx-slider', label: 'pause-sfx-val', value: audio.getSfxVolume() },
+  ];
+  for (const p of pairs) {
+    const slider = document.getElementById(p.slider) as HTMLInputElement | null;
+    const label = document.getElementById(p.label);
+    if (slider) slider.value = p.value.toFixed(2);
+    if (label) label.textContent = volumeText(p.value);
+  }
+}
+
+function bindVolumeSlider(id: string, kind: 'music' | 'sfx'): void {
+  const slider = document.getElementById(id) as HTMLInputElement | null;
+  if (!slider) return;
+  slider.addEventListener('input', () => {
+    const value = parseFloat(slider.value);
+    if (kind === 'music') audio.setMusicVolume(value);
+    else audio.setSfxVolume(value);
+    syncVolumeControls();
+  });
+}
+
+bindVolumeSlider('home-music-slider', 'music');
+bindVolumeSlider('pause-music-slider', 'music');
+bindVolumeSlider('home-sfx-slider', 'sfx');
+bindVolumeSlider('pause-sfx-slider', 'sfx');
+
+const homeSettingsBtn = document.getElementById('home-settings-btn')!;
+const homeSettingsPanel = document.getElementById('home-settings-panel')!;
+homeSettingsBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  homeSettingsPanel.classList.toggle('open');
+});
+homeSettingsPanel.addEventListener('click', (e) => e.stopPropagation());
+syncVolumeControls();
+audio.startAmbient();
+
 function refreshBank(): void {
   document.getElementById('bank-text')!.textContent =
     `💰 金库 ${meta.data.bank} ｜ 最深 ${meta.data.bestDepth} ｜ 撤离 ${meta.data.extracts}/${meta.data.runs} ｜ 图鉴 ${meta.data.collection.length}/${TREASURES.length + RELICS.length}`;
@@ -116,6 +177,12 @@ const SHOP: ShopEntry[] = [
     buy: () => { meta.data.magLv += 1; },
   },
   {
+    label: () => `🛡️ 护盾槽扩容 Lv${meta.data.shieldCapLv}/3（每级+1护盾上限）`,
+    cost: () => 140 * (meta.data.shieldCapLv + 1),
+    canBuy: () => meta.data.shieldCapLv < 3,
+    buy: () => { meta.data.shieldCapLv += 1; },
+  },
+  {
     label: () => meta.data.assistantOwned ? '🦉 助手·夜枭（已雇佣）' : '🦉 雇佣助手·夜枭：搜索+35%/回神智/群体电击',
     cost: () => 250,
     canBuy: () => !meta.data.assistantOwned,
@@ -152,6 +219,60 @@ function renderArmory(): void {
   }
 }
 
+// ===== 养成（局外金币永久强化） =====
+const TRAINING: ShopEntry[] = [
+  {
+    label: () => `❤️ 生命训练 Lv${meta.data.hpLv}/5（每级生命上限 +${HP_TRAINING_STEP}）`,
+    cost: () => 90 * (meta.data.hpLv + 1),
+    canBuy: () => meta.data.hpLv < 5,
+    buy: () => { meta.data.hpLv += 1; },
+  },
+  {
+    label: () => `🧠 神志训练 Lv${meta.data.sanityLv}/5（每级神志上限 +${SANITY_TRAINING_STEP}）`,
+    cost: () => 80 * (meta.data.sanityLv + 1),
+    canBuy: () => meta.data.sanityLv < 5,
+    buy: () => { meta.data.sanityLv += 1; },
+  },
+  {
+    label: () => {
+      const pct = Math.round((1 - RELOAD_TRAINING_MULT) * 100);
+      return `🔁 战术换弹 Lv${meta.data.reloadLv}/1（非手枪换弹时间 -${pct}%）`;
+    },
+    cost: () => 260,
+    canBuy: () => meta.data.reloadLv < 1,
+    buy: () => { meta.data.reloadLv = 1; },
+  },
+];
+
+function renderProgression(): void {
+  const panel = document.getElementById('progression-panel')!;
+  panel.innerHTML = '';
+  for (const entry of TRAINING) {
+    const row = document.createElement('div');
+    row.className = 'shop-row';
+    const buyable = entry.canBuy();
+    row.innerHTML = `<strong>${entry.label()}</strong>`;
+    const btn = document.createElement('button');
+    if (buyable) {
+      btn.textContent = `💰 ${entry.cost()}`;
+      btn.disabled = meta.data.bank < entry.cost();
+      btn.addEventListener('click', () => {
+        if (meta.spend(entry.cost())) {
+          entry.buy();
+          meta.save();
+          refreshBank();
+          renderProgression();
+        }
+      });
+    } else {
+      btn.textContent = '✓';
+      btn.disabled = true;
+    }
+    row.appendChild(btn);
+    panel.appendChild(row);
+  }
+}
+
 // ===== 收藏图鉴 =====
 function renderGallery(): void {
   const g = document.getElementById('gallery')!;
@@ -174,17 +295,23 @@ function renderGallery(): void {
 let tab = '';
 function setTab(t: string): void {
   tab = tab === t ? '' : t;
+  if (tab === 'armory') renderArmory();
+  if (tab === 'progression') renderProgression();
+  if (tab === 'gallery') renderGallery();
   document.getElementById('armory-panel')!.style.display = tab === 'armory' ? 'flex' : 'none';
+  document.getElementById('progression-panel')!.style.display = tab === 'progression' ? 'flex' : 'none';
   document.getElementById('gallery')!.style.display = tab === 'gallery' ? 'flex' : 'none';
   document.getElementById('tab-armory')!.className = 'tab-btn' + (tab === 'armory' ? ' active' : '');
+  document.getElementById('tab-progression')!.className = 'tab-btn' + (tab === 'progression' ? ' active' : '');
   document.getElementById('tab-gallery')!.className = 'tab-btn' + (tab === 'gallery' ? ' active' : '');
 }
 document.getElementById('tab-armory')!.addEventListener('click', () => setTab('armory'));
+document.getElementById('tab-progression')!.addEventListener('click', () => setTab('progression'));
 document.getElementById('tab-gallery')!.addEventListener('click', () => setTab('gallery'));
 
 function startGame(startDepth: number): void {
-  audio.init();
-  audio.startAmbient();
+  ensureAudioStarted();
+  document.getElementById('stage')!.classList.add('game-started');
   document.getElementById('start-overlay')!.style.display = 'none';
   const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
   const game = new Game(canvas, meta, audio, startDepth);
@@ -203,4 +330,5 @@ if (meta.data.checkpoint > 0) {
 refreshBank();
 renderChapters();
 renderArmory();
+renderProgression();
 renderGallery();

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RoomType, ROOM_INFO, sanityCostFor } from './rooms';
+import { RouteNode, RouteMapSnapshot, ROOM_INFO, sanityCostFor } from './rooms';
 import { Backpack, InvItem, RARITY_INFO, ConsumableKind, CONSUMABLE_INFO } from './items';
 import { Pact } from './pacts';
 
@@ -11,12 +11,49 @@ interface Floater {
 }
 
 const CELL = 44;
+const QUICK_SLOT_KEY = 'tomb_quick_slots_v1';
+const QUICK_SLOT_DEFAULTS: ConsumableKind[] = ['med', 'sedative'];
+
+const ROOM_ART: Record<string, string> = {
+  corridor: 'assets/art/route/route-start-256.webp',
+  supply: 'assets/art/route/route-supply-256.webp',
+  gem: 'assets/art/route/route-gem-256.webp',
+  blessing: 'assets/art/route/route-blessing-256.webp',
+  curse: 'assets/art/route/route-curse-256.webp',
+  safehouse: 'assets/art/route/route-campfire-256.webp',
+  shop: 'assets/art/route/route-shop-256.webp',
+  boss: 'assets/art/route/route-boss-256.webp',
+};
+
+const ROOM_LABEL: Record<string, string> = {
+  corridor: '起点',
+  supply: '补给',
+  gem: '宝藏',
+  blessing: '祝福',
+  curse: '献祭',
+  safehouse: '篝火',
+  shop: '商店',
+  boss: 'BOSS',
+};
+
+function hasRoomArt(type: string): boolean {
+  return ROOM_ART[type] !== undefined;
+}
+
+function roomArtHtml(type: string, fallbackIcon: string, className: string): string {
+  const src = ROOM_ART[type];
+  if (!src) return fallbackIcon;
+  return `<img class="${className}" src="${src}" alt="" loading="lazy" decoding="async" ` +
+    `onerror="this.style.display='none';this.nextElementSibling.style.display='inline'">` +
+    `<span class="${className}-fallback">${fallbackIcon}</span>`;
+}
 
 export class HUD {
   private hpFill: HTMLElement;
   private hpText: HTMLElement;
   private sanFill: HTMLElement;
   private sanText: HTMLElement;
+  private shieldText: HTMLElement;
   private pickupLog!: HTMLElement;
   private depthText: HTMLElement;
   private stateText: HTMLElement;
@@ -26,10 +63,11 @@ export class HUD {
   private promptEl: HTMLElement;
   private vignette: HTMLElement;
   private sanVignette!: HTMLElement;
+  private roomTransition: HTMLElement;
+  private routeMap: HTMLElement;
   private floaterLayer: HTMLElement;
   private searchPanel: HTMLElement;
   private searchLabel: HTMLElement;
-  private skipBtn: HTMLElement;
   private choiceOverlay: HTMLElement;
   private choiceCards: HTMLElement;
   private extractOverlay: HTMLElement;
@@ -51,9 +89,10 @@ export class HUD {
   private itemBtn: HTMLElement;
   private itemExpand: HTMLElement;
   private itemDropdown: HTMLElement;
-  private mostNeededKind: ConsumableKind | null = null;
   private skillBtn: HTMLElement;
   private selIndex: number = 0;
+  private quickSlots: ConsumableKind[] = QUICK_SLOT_DEFAULTS.slice();
+  private quickSlotMenu: HTMLElement | null = null;
 
   // 网格背包
   private bagOverlay: HTMLElement;
@@ -82,9 +121,19 @@ export class HUD {
   private adsMode: boolean = false;
   private floaters: Floater[] = [];
   private stage: HTMLElement;
+  private routeMapExpanded: boolean = false;
+  private routeChoiceMode: boolean = false;
+  private routeDebugMode: boolean = false;
+  private routeSnapshot: RouteMapSnapshot | null = null;
+  private routeMapDragViewport: HTMLElement | null = null;
+  private routeMapDragPointerId: number = -1;
+  private routeMapDragStartX: number = 0;
+  private routeMapDragStartY: number = 0;
+  private routeMapDragStartScrollTop: number = 0;
+  private routeMapDragMoved: boolean = false;
+  private routeMapSuppressClickUntil: number = 0;
 
-  onSkipSearch: (() => void) | null = null;
-  onChoice: ((t: RoomType) => void) | null = null;
+  onChoice: ((node: RouteNode) => void) | null = null;
   onExtract: ((leave: boolean) => void) | null = null;
   onIntelContinue: (() => void) | null = null;
   onWeaponTap: ((index: number) => void) | null = null;
@@ -95,23 +144,36 @@ export class HUD {
   onUseConsumableItem: ((kind: ConsumableKind) => void) | null = null; // 在背包内使用消耗品
   onBagToggle: ((open: boolean) => void) | null = null;    // 打开/关闭背包（暂停）
   onPauseToggle: ((paused: boolean) => void) | null = null; // 暂停按钮
+  onRouteMapToggle: ((open: boolean) => void) | null = null; // 展开路线图（暂停）
   onSensitivity: ((v: number) => void) | null = null;       // 瞄准灵敏度滑块
 
   constructor() {
     const $ = (id: string): HTMLElement => document.getElementById(id)!;
+    this.quickSlots = this.loadQuickSlots();
     this.stage = $('stage');
     this.hpFill = $('hp-fill'); this.hpText = $('hp-text');
     this.sanFill = $('san-fill'); this.sanText = $('san-text');
+    this.shieldText = $('shield-text');
     this.pickupLog = $('pickup-log'); this.depthText = $('depth-text');
     this.stateText = $('state-text');
     this.crosshair = $('crosshair'); this.hitmarker = $('hitmarker');
     this.toastEl = $('toast'); this.promptEl = $('prompt');
     this.vignette = $('vignette');
     this.sanVignette = $('vignette-san');
+    this.roomTransition = $('room-transition');
+    this.routeMap = $('route-map');
+    this.routeMap.addEventListener('click', (e) => this.onRouteMapClick(e));
+    this.routeMap.addEventListener('pointerdown', (e) => this.onRouteMapDragStart(e));
+    window.addEventListener('pointerdown', (e) => this.onRouteMapOutsidePointer(e), true);
+    window.addEventListener('pointermove', (e) => this.onRouteMapDragMove(e), true);
+    window.addEventListener('pointerup', (e) => this.onRouteMapDragEnd(e), true);
+    window.addEventListener('pointercancel', (e) => this.onRouteMapDragEnd(e), true);
+    window.addEventListener('keydown', (e) => this.onRouteMapKeyDown(e), true);
+    window.addEventListener('keydown', (e) => this.onBagKeyDown(e), true);
+    window.addEventListener('keydown', (e) => this.onItemExpandKeyDown(e), true);
     this.floaterLayer = $('floater-layer');
     this.searchPanel = $('search-panel');
     this.searchLabel = $('search-label');
-    this.skipBtn = $('skip-btn');
     this.choiceOverlay = $('choice-overlay');
     this.choiceCards = $('choice-cards');
     this.extractOverlay = $('extract-overlay');
@@ -151,7 +213,6 @@ export class HUD {
     });
     $('shop-refresh').addEventListener('click', () => { if (this.onShopRefresh) this.onShopRefresh(); });
 
-    this.skipBtn.addEventListener('click', () => { if (this.onSkipSearch) this.onSkipSearch(); });
     $('extract-yes').addEventListener('click', () => {
       this.extractOverlay.style.display = 'none';
       if (this.onExtract) this.onExtract(true);
@@ -190,33 +251,43 @@ export class HUD {
       el.addEventListener('click', () => this.onSlotClick(slot));
     });
 
-    // 消耗品按钮
-    this.nadeBtn.addEventListener('click', () => { if (this.onUseConsumable) this.onUseConsumable('grenade'); });
-    // 物品栏：主按钮使用“最需要”的消耗品；▲ 展开下拉选择任意消耗品
-    this.itemBtn.addEventListener('click', () => {
-      if (this.mostNeededKind && this.onUseConsumable) this.onUseConsumable(this.mostNeededKind);
-    });
+    // 快捷消耗品槽：1/2 使用当前绑定道具；TAB 展开背包道具并替换绑定。
+    this.nadeBtn.addEventListener('click', () => this.useQuickSlot(0));
+    this.itemBtn.addEventListener('click', () => this.useQuickSlot(1));
+    this.wireQuickSlotDrop(this.nadeBtn, 0);
+    this.wireQuickSlotDrop(this.itemBtn, 1);
     this.itemExpand.addEventListener('click', (e) => { e.stopPropagation(); this.toggleItemDropdown(); });
+    this.itemDropdown.addEventListener('click', (e) => {
+      if (e.target === this.itemDropdown) this.closeItemDropdown();
+    });
     this.skillBtn.addEventListener('click', () => { if (this.onUseSkill) this.onUseSkill(); });
 
     // 拖拽全局监听
+    window.addEventListener('pointerdown', (e) => this.onItemDropdownOutsidePointer(e), true);
     window.addEventListener('pointermove', (e) => this.onPointerMove(e));
     window.addEventListener('pointerup', (e) => this.onPointerUp(e));
   }
 
-  bindBag(bag: Backpack): void { this.bag = bag; }
+  bindBag(bag: Backpack): void {
+    this.bag = bag;
+    this.renderQuickSlot(0);
+    this.renderQuickSlot(1);
+  }
 
   update(
-    dt: number, hp: number, maxHp: number, sanity: number, maxSanity: number,
+    dt: number, hp: number, maxHp: number, shieldCount: number, maxShieldCount: number, sanity: number, maxSanity: number,
     ammo: number, magSize: number, reloading: number, reloadTime: number,
     bagValue: number, depth: number, stateLabel: string, mousePx: { x: number; y: number },
     reserve: number, coins: number
   ): void {
-    this.hpFill.style.width = `${Math.max(0, (hp / maxHp) * 100)}%`;
+    const hpPct = Math.max(0, Math.min(100, (hp / maxHp) * 100));
+    const sanPct = Math.max(0, Math.min(100, (sanity / maxSanity) * 100));
+    this.hpFill.style.strokeDasharray = `${hpPct} 100`;
+    this.sanFill.style.strokeDasharray = `${sanPct} 100`;
     this.hpText.textContent = `${Math.ceil(hp)}`;
-    this.sanFill.style.width = `${Math.max(0, (sanity / maxSanity) * 100)}%`;
     this.sanText.textContent = `${Math.ceil(sanity)}`;
-    this.depthText.textContent = `深度 ${depth}`;
+    this.shieldText.textContent = `🛡 ${shieldCount}/${Math.max(0, maxShieldCount)}`;
+    this.depthText.textContent = `${depth}`;
     this.stateText.textContent = stateLabel;
     this.bagBtnVal.textContent = `${bagValue}`;
 
@@ -231,32 +302,8 @@ export class HUD {
 
     // 底部消耗品余量（来自背包库存）
     if (this.bag) {
-      this.setConCount(this.nadeBtn, this.bag.countKind('grenade'));
-      // 物品栏：根据生命/神智百分比，优先显示最需要的消耗品
-      const meds = (Object.keys(CONSUMABLE_INFO) as ConsumableKind[])
-        .filter((k) => k !== 'grenade' && this.bag!.countKind(k) > 0);
-      let pick: ConsumableKind | null = null;
-      if (meds.length > 0) {
-        const needHp = (hp / maxHp) <= (sanity / maxSanity);
-        const prefer = meds.filter((k) => needHp ? CONSUMABLE_INFO[k].hp > 0 : CONSUMABLE_INFO[k].san > 0);
-        const pool = prefer.length ? prefer : meds;
-        pool.sort((a, b) => needHp
-          ? CONSUMABLE_INFO[b].hp - CONSUMABLE_INFO[a].hp
-          : CONSUMABLE_INFO[b].san - CONSUMABLE_INFO[a].san);
-        pick = pool[0];
-      }
-      this.mostNeededKind = pick;
-      const ic = this.itemBtn.querySelector('.a-icon') as HTMLElement | null;
-      const nn = this.itemBtn.querySelector('.a-n') as HTMLElement | null;
-      if (pick) {
-        if (ic) ic.textContent = CONSUMABLE_INFO[pick].icon;
-        if (nn) nn.textContent = `×${this.bag.countKind(pick)}`;
-        this.itemBtn.classList.remove('empty');
-      } else {
-        if (ic) ic.textContent = '🧪';
-        if (nn) nn.textContent = '×0';
-        this.itemBtn.classList.add('empty');
-      }
+      this.renderQuickSlot(0);
+      this.renderQuickSlot(1);
     }
 
     const cx = this.adsMode ? this.stage.clientWidth / 2 : mousePx.x;
@@ -290,8 +337,8 @@ export class HUD {
     list.forEach((w, i) => {
       const btn = document.createElement('button');
       btn.className = 'wbtn';
-      btn.innerHTML = `<span class="w-icon">${w.icon}</span><span class="w-ammo"></span>`;
-      btn.title = w.name;
+      btn.innerHTML = `<span class="w-key">Q</span><span class="w-icon">${w.icon}</span><span class="w-ammo"></span>`;
+      btn.title = `${w.name}${list.length > 1 ? '（Q 切换）' : ''}`;
       btn.addEventListener('click', () => { if (this.onWeaponTap) this.onWeaponTap(i); });
       this.weaponSlotsEl.appendChild(btn);
       this.weaponBtns.push(btn);
@@ -300,51 +347,261 @@ export class HUD {
   }
   setWeaponSelected(index: number): void {
     this.selIndex = index;
-    this.weaponBtns.forEach((b, i) => b.classList.toggle('selected', i === index));
+    const canSwap = this.weaponBtns.length > 1;
+    this.weaponBtns.forEach((b, i) => {
+      b.classList.toggle('selected', i === index);
+      b.classList.toggle('swap-ready', canSwap && i !== index);
+    });
   }
   updateSkill(owned: boolean, charges: number): void {
     if (!owned) { this.skillBtn.style.display = 'none'; return; }
     this.skillBtn.style.display = 'flex';
     this.skillBtn.classList.toggle('empty', charges <= 0);
+    this.skillBtn.title = 'E：夜枭雷暴';
     const el = this.skillBtn.querySelector('.a-n') as HTMLElement | null;
     if (el) el.textContent = `×${charges}`;
   }
-  // 物品栏下拉：列出背包中所有消耗品（不含手雷），点击使用
+  // 物品栏下拉：列出背包中所有消耗品，支持点击选择槽位或拖到槽位。
   private toggleItemDropdown(): void {
     if (this.itemDropdown.classList.contains('open')) {
-      this.itemDropdown.classList.remove('open');
+      this.closeItemDropdown();
       return;
     }
+    this.closeQuickSlotMenu();
+    this.renderItemDropdown();
+    this.itemDropdown.classList.add('open');
+  }
+
+  private closeItemDropdown(): void {
+    this.closeQuickSlotMenu();
+    this.itemDropdown.classList.remove('open');
+  }
+
+  private renderItemDropdown(): void {
     this.itemDropdown.innerHTML = '';
     const kinds = (Object.keys(CONSUMABLE_INFO) as ConsumableKind[])
-      .filter((k) => k !== 'grenade' && this.bag !== null && this.bag.countKind(k) > 0);
+      .filter((k) => this.bag !== null && this.bag.countKind(k) > 0);
     if (kinds.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'item-row';
-      empty.textContent = '（无消耗品）';
+      empty.textContent = '（无可用道具）';
       this.itemDropdown.appendChild(empty);
     }
     for (const k of kinds) {
       const info = CONSUMABLE_INFO[k];
       const row = document.createElement('div');
       row.className = 'item-row';
-      row.innerHTML = `<span class="ir-icon">${info.icon}</span><span>${info.name}<span class="ir-desc"> ${info.desc}</span></span><span class="ir-n">×${this.bag!.countKind(k)}</span>`;
-      row.addEventListener('click', () => {
-        this.itemDropdown.classList.remove('open');
-        if (this.onUseConsumable) this.onUseConsumable(k);
+      row.draggable = true;
+      row.dataset.kind = k;
+      row.innerHTML =
+        `<span class="ir-icon">${info.icon}</span>` +
+        `<span>${info.name}<span class="ir-desc"> ${info.desc}</span></span>` +
+        `<span class="ir-n">×${this.bag!.countKind(k)}</span>`;
+      row.addEventListener('dragstart', (e) => {
+        e.dataTransfer?.setData('application/x-consumable', k);
+        e.dataTransfer?.setData('text/plain', k);
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy';
+        row.classList.add('dragging');
+      });
+      row.addEventListener('dragend', () => row.classList.remove('dragging'));
+      row.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.closeQuickSlotMenu();
+        if (this.onUseConsumable) {
+          this.onUseConsumable(k);
+          this.renderQuickSlot(0);
+          this.renderQuickSlot(1);
+          this.renderItemDropdown();
+        }
       });
       this.itemDropdown.appendChild(row);
     }
-    this.itemDropdown.classList.add('open');
   }
 
-  private setConCount(btn: HTMLElement, n: number): void {
+  getQuickConsumable(slot: number): ConsumableKind {
+    return this.quickSlots[slot] || QUICK_SLOT_DEFAULTS[slot] || 'med';
+  }
+
+  private loadQuickSlots(): ConsumableKind[] {
+    try {
+      const raw = localStorage.getItem(QUICK_SLOT_KEY);
+      if (!raw) return QUICK_SLOT_DEFAULTS.slice();
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return QUICK_SLOT_DEFAULTS.slice();
+      const loaded = [0, 1].map((slot) => {
+        const value = parsed[slot];
+        return this.isConsumableKind(value) ? value : QUICK_SLOT_DEFAULTS[slot];
+      });
+      return this.normalizeQuickSlots(loaded);
+    } catch (e) {
+      return QUICK_SLOT_DEFAULTS.slice();
+    }
+  }
+
+  private normalizeQuickSlots(slots: ConsumableKind[]): ConsumableKind[] {
+    const normalized = [slots[0] || QUICK_SLOT_DEFAULTS[0], slots[1] || QUICK_SLOT_DEFAULTS[1]];
+    if (normalized[0] === normalized[1]) {
+      const fallback = QUICK_SLOT_DEFAULTS.find((kind) => kind !== normalized[0]) ||
+        (Object.keys(CONSUMABLE_INFO) as ConsumableKind[]).find((kind) => kind !== normalized[0]);
+      if (fallback) normalized[1] = fallback;
+    }
+    return normalized;
+  }
+
+  private saveQuickSlots(): void {
+    try {
+      localStorage.setItem(QUICK_SLOT_KEY, JSON.stringify(this.quickSlots.slice(0, 2)));
+    } catch (e) { /* ignore */ }
+  }
+
+  private useQuickSlot(slot: number): void {
+    if (this.onUseConsumable) this.onUseConsumable(this.getQuickConsumable(slot));
+  }
+
+  private renderQuickSlot(slot: number): void {
+    const btn = slot === 0 ? this.nadeBtn : this.itemBtn;
+    const kind = this.getQuickConsumable(slot);
+    const info = CONSUMABLE_INFO[kind];
+    const icon = btn.querySelector('.a-icon') as HTMLElement | null;
+    const count = btn.querySelector('.a-n') as HTMLElement | null;
+    const n = this.bag ? this.bag.countKind(kind) : 0;
+    if (icon) icon.textContent = info.icon;
+    if (count) count.textContent = `×${n}`;
     btn.classList.toggle('empty', n <= 0);
-    const el = btn.querySelector('.a-n') as HTMLElement | null;
-    if (el) el.textContent = `×${n}`;
+    btn.title = `${slot + 1}: ${info.name}`;
+  }
+
+  private assignQuickSlot(slot: number, kind: ConsumableKind): void {
+    const otherSlot = slot === 0 ? 1 : 0;
+    const previous = this.getQuickConsumable(slot);
+    const swapped = this.quickSlots[otherSlot] === kind && previous !== kind;
+    this.quickSlots[slot] = kind;
+    if (swapped) this.quickSlots[otherSlot] = previous;
+    this.quickSlots = this.normalizeQuickSlots(this.quickSlots);
+    this.saveQuickSlots();
+    this.renderQuickSlot(slot);
+    this.renderQuickSlot(otherSlot);
+    this.closeItemDropdown();
+    this.showToast(swapped
+      ? `${CONSUMABLE_INFO[kind].icon} 已与槽位 ${otherSlot + 1} 交换`
+      : `${CONSUMABLE_INFO[kind].icon} 已绑定到槽位 ${slot + 1}`);
+  }
+
+  private showQuickSlotMenu(row: HTMLElement, kind: ConsumableKind): void {
+    this.closeQuickSlotMenu();
+    row.classList.add('selecting');
+    const menu = document.createElement('div');
+    menu.className = 'item-slot-menu';
+    for (let slot = 0; slot < 2; slot++) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = `放到槽位 ${slot + 1}`;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.assignQuickSlot(slot, kind);
+      });
+      menu.appendChild(btn);
+    }
+    row.appendChild(menu);
+    this.quickSlotMenu = menu;
+  }
+
+  private closeQuickSlotMenu(): void {
+    if (!this.quickSlotMenu) return;
+    const row = this.quickSlotMenu.parentElement;
+    if (row) row.classList.remove('selecting');
+    this.quickSlotMenu.remove();
+    this.quickSlotMenu = null;
+  }
+
+  private wireQuickSlotDrop(btn: HTMLElement, slot: number): void {
+    btn.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      btn.classList.add('drop-ok');
+    });
+    btn.addEventListener('dragleave', () => btn.classList.remove('drop-ok'));
+    btn.addEventListener('drop', (e) => {
+      e.preventDefault();
+      btn.classList.remove('drop-ok');
+      const kind = e.dataTransfer?.getData('application/x-consumable') || e.dataTransfer?.getData('text/plain') || '';
+      if (this.isConsumableKind(kind)) this.assignQuickSlot(slot, kind);
+    });
+  }
+
+  private isConsumableKind(value: string): value is ConsumableKind {
+    return CONSUMABLE_INFO[value as ConsumableKind] !== undefined;
   }
 
   // ===== 网格背包 =====
+  private onBagKeyDown(e: KeyboardEvent): void {
+    if (e.code !== 'KeyB' || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+    const target = e.target as HTMLElement | null;
+    if (target && (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.tagName === 'SELECT' ||
+      target.isContentEditable
+    )) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (this.bagOverlay.style.display === 'flex') {
+      this.closeBag();
+      return;
+    }
+    if (this.isOverlayVisible('start-overlay') || this.isOverlayVisible('end-overlay') ||
+      this.isOverlayVisible('bagfull-overlay') || this.isOverlayVisible('choice-overlay') ||
+      this.isOverlayVisible('extract-overlay') || this.isOverlayVisible('intel-overlay') ||
+      this.isOverlayVisible('shop-overlay') || this.isOverlayVisible('pause-overlay')) {
+      return;
+    }
+    if (this.routeMapExpanded) this.collapseRouteMap(true);
+    this.openBag();
+  }
+
+  private onItemExpandKeyDown(e: KeyboardEvent): void {
+    if (e.key === 'Escape' && this.itemDropdown.classList.contains('open')) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.closeItemDropdown();
+      return;
+    }
+    if (e.code !== 'Tab' || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+    const target = e.target as HTMLElement | null;
+    if (target && (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.tagName === 'SELECT' ||
+      target.isContentEditable
+    )) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (this.isOverlayVisible('start-overlay') || this.isOverlayVisible('end-overlay') ||
+      this.isOverlayVisible('bagfull-overlay') || this.isOverlayVisible('choice-overlay') ||
+      this.isOverlayVisible('extract-overlay') || this.isOverlayVisible('intel-overlay') ||
+      this.isOverlayVisible('shop-overlay') || this.isOverlayVisible('pause-overlay') ||
+      this.bagOverlay.style.display === 'flex' || this.routeMapExpanded) {
+      return;
+    }
+    this.toggleItemDropdown();
+  }
+
+  private onItemDropdownOutsidePointer(e: PointerEvent): void {
+    if (!this.itemDropdown.classList.contains('open')) return;
+    const target = e.target as HTMLElement | null;
+    if (target && (this.itemDropdown.contains(target) || this.itemExpand.contains(target))) return;
+    this.closeItemDropdown();
+  }
+
+  private isOverlayVisible(id: string): boolean {
+    const el = document.getElementById(id);
+    return !!el && getComputedStyle(el).display !== 'none';
+  }
+
   private openBag(): void {
     this.bagOverlay.style.display = 'flex';
     if (this.onBagToggle) this.onBagToggle(true);
@@ -552,10 +809,12 @@ export class HUD {
   // ===== BOSS血条 =====
   showBossBar(name: string): void {
     this.bossName.textContent = name;
+    this.bossFill.style.width = '100%';
     this.bossBar.style.display = 'block';
   }
   updateBossBar(hp: number, maxHp: number, phase: number): void {
-    this.bossFill.style.width = `${Math.max(0, (hp / maxHp) * 100)}%`;
+    const pct = maxHp > 0 ? Math.max(0, Math.min(100, (hp / maxHp) * 100)) : 0;
+    this.bossFill.style.width = `${pct}%`;
     this.bossName.textContent = this.bossName.textContent!.split(' ·')[0] + (phase === 2 ? ' · 暴怒' : '');
   }
   hideBossBar(): void { this.bossBar.style.display = 'none'; }
@@ -567,6 +826,11 @@ export class HUD {
 
   setAds(on: boolean): void { this.adsMode = on; }
 
+  setRoomTransition(alpha: number, visible: boolean): void {
+    this.roomTransition.style.display = visible ? 'block' : 'none';
+    this.roomTransition.style.opacity = `${Math.max(0, Math.min(1, alpha))}`;
+  }
+
   showHitmarker(headshot: boolean): void {
     this.hitmarker.style.opacity = '1';
     this.hitmarker.style.color = headshot ? '#ff5c5c' : '#ffffff';
@@ -577,6 +841,10 @@ export class HUD {
   setPrompt(text: string | null): void {
     if (text) { this.promptEl.textContent = text; this.promptEl.style.opacity = '1'; }
     else this.promptEl.style.opacity = '0';
+  }
+
+  setStateLabel(text: string): void {
+    this.stateText.textContent = text;
   }
 
   showToast(text: string): void {
@@ -618,24 +886,288 @@ export class HUD {
   }
   hideSearchPanel(): void { this.searchPanel.style.display = 'none'; }
 
-  showChoice(options: RoomType[], depth: number = 0, sanityReduce: number = 0): void {
+  dismissBlockingOverlays(): void {
+    this.choiceOverlay.style.display = 'none';
+    this.extractOverlay.style.display = 'none';
+    this.intelOverlay.style.display = 'none';
+    this.shopOverlay.style.display = 'none';
+    this.bagOverlay.style.display = 'none';
+    document.getElementById('pause-overlay')!.style.display = 'none';
+    document.getElementById('bagfull-overlay')!.style.display = 'none';
+  }
+
+  renderRouteMap(snapshot: RouteMapSnapshot): void {
+    this.routeSnapshot = snapshot;
+    this.drawRouteMap(snapshot);
+  }
+
+  showRouteChoice(snapshot: RouteMapSnapshot): void {
+    this.routeSnapshot = snapshot;
+    this.routeChoiceMode = true;
+    this.routeDebugMode = false;
+    this.setRouteMapExpanded(true, true);
+  }
+
+  setRouteChoiceReady(snapshot: RouteMapSnapshot): void {
+    this.routeSnapshot = snapshot;
+    this.routeChoiceMode = true;
+    this.routeDebugMode = false;
+    this.drawRouteMap(snapshot);
+  }
+
+  closeRouteMap(): void {
+    this.routeDebugMode = false;
+    this.collapseRouteMap(false);
+  }
+
+  setRouteDebugMode(enabled: boolean, snapshot: RouteMapSnapshot): void {
+    this.routeSnapshot = snapshot;
+    this.routeDebugMode = enabled;
+    if (enabled) {
+      this.setRouteMapExpanded(true, true);
+    } else {
+      this.collapseRouteMap(true);
+    }
+  }
+
+  private collapseRouteMap(preserveChoiceMode: boolean = true): void {
+    if (!preserveChoiceMode) {
+      this.routeChoiceMode = false;
+    }
+    this.routeDebugMode = false;
+    this.setRouteMapExpanded(false, true);
+  }
+
+  private onRouteMapOutsidePointer(e: PointerEvent): void {
+    if (!this.routeMapExpanded) return;
+    const target = e.target;
+    if (target instanceof Node && this.routeMap.contains(target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.collapseRouteMap(true);
+  }
+
+  private onRouteMapKeyDown(e: KeyboardEvent): void {
+    if (!this.routeMapExpanded || e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.collapseRouteMap(true);
+  }
+
+  private onRouteMapDragStart(e: PointerEvent): void {
+    if (!this.routeMapExpanded) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    const viewport = target?.closest('.route-canvas') as HTMLElement | null;
+    if (!viewport) return;
+
+    this.routeMapDragViewport = viewport;
+    this.routeMapDragPointerId = e.pointerId;
+    this.routeMapDragStartX = e.clientX;
+    this.routeMapDragStartY = e.clientY;
+    this.routeMapDragStartScrollTop = viewport.scrollTop;
+    this.routeMapDragMoved = false;
+  }
+
+  private onRouteMapDragMove(e: PointerEvent): void {
+    const viewport = this.routeMapDragViewport;
+    if (!viewport || e.pointerId !== this.routeMapDragPointerId) return;
+    const dx = e.clientX - this.routeMapDragStartX;
+    const dy = e.clientY - this.routeMapDragStartY;
+    if (Math.hypot(dx, dy) <= 4) return;
+
+    if (!this.routeMapDragMoved) {
+      viewport.classList.add('dragging');
+    }
+    this.routeMapDragMoved = true;
+    viewport.scrollTop = this.routeMapDragStartScrollTop - dy;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  private onRouteMapDragEnd(e: PointerEvent): void {
+    const viewport = this.routeMapDragViewport;
+    if (!viewport || e.pointerId !== this.routeMapDragPointerId) return;
+    viewport.classList.remove('dragging');
+
+    const dragged = this.routeMapDragMoved;
+    this.routeMapDragViewport = null;
+    this.routeMapDragPointerId = -1;
+    this.routeMapDragMoved = false;
+    if (dragged) {
+      this.routeMapSuppressClickUntil = performance.now() + 160;
+    }
+  }
+
+  private onRouteMapClick(e: MouseEvent): void {
+    if (performance.now() <= this.routeMapSuppressClickUntil) {
+      this.routeMapSuppressClickUntil = 0;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    const target = e.target as HTMLElement;
+    const nodeEl = target.closest('.route-node.selectable') as HTMLElement | null;
+    if (nodeEl && this.routeSnapshot) {
+      e.stopPropagation();
+      const id = nodeEl.dataset.routeId;
+      const node = this.routeSnapshot.nodes.find((n) => n.id === id);
+      if (!node) return;
+      this.closeRouteMap();
+      if (this.onChoice) this.onChoice(node);
+      return;
+    }
+    if (target.closest('.route-map-toggle')) {
+      e.stopPropagation();
+      this.setRouteMapExpanded(!this.routeMapExpanded);
+      return;
+    }
+    if (target.closest('.route-map-close')) {
+      e.stopPropagation();
+      this.collapseRouteMap(true);
+    }
+  }
+
+  private setRouteMapExpanded(open: boolean, force: boolean = false): void {
+    if (this.routeMapExpanded === open && !force) return;
+    this.routeMapExpanded = open;
+    this.stage.classList.toggle('route-map-open', open);
+    if (this.onRouteMapToggle) this.onRouteMapToggle(open);
+    if (this.routeSnapshot) this.drawRouteMap(this.routeSnapshot);
+    if (open) this.centerRouteMapSoon();
+  }
+
+  private centerRouteMapSoon(): void {
+    requestAnimationFrame(() => this.centerRouteMapOnProgress());
+  }
+
+  private centerRouteMapOnProgress(): void {
+    const viewport = this.routeMap.querySelector('.route-canvas') as HTMLElement | null;
+    if (!viewport) return;
+    const target =
+      this.routeMap.querySelector('.route-node.current') as HTMLElement | null ||
+      this.routeMap.querySelector('.route-node.selectable') as HTMLElement | null ||
+      this.routeMap.querySelector('.route-node.next') as HTMLElement | null;
+    if (!target) {
+      viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      return;
+    }
+
+    const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    const desired = target.offsetTop - viewport.clientHeight * 0.58;
+    viewport.scrollTop = Math.max(0, Math.min(maxScroll, desired));
+  }
+
+  private drawRouteMap(snapshot: RouteMapSnapshot): void {
+    const nodes = snapshot.nodes;
+    if (nodes.length === 0) {
+      this.routeMap.innerHTML = '';
+      return;
+    }
+    const nodeById = new Map(nodes.map((n) => [n.id, n]));
+    const choiceIds = new Set(snapshot.choiceIds);
+    const current = snapshot.currentId ? nodeById.get(snapshot.currentId) || null : null;
+    const progressMax = Math.max(1, snapshot.segmentEndDepth - snapshot.segmentStartDepth);
+    const progress = current ? Math.max(0, Math.min(progressMax, current.depth - snapshot.segmentStartDepth)) : 0;
+    const laneX = (lane: number): number => 16 + lane * 34;
+    const floorGap = 104;
+    const mapPaddingY = 72;
+    const routeContentHeight = mapPaddingY * 2 + Math.max(1, snapshot.floors - 1) * floorGap;
+    const floorY = (floor: number): number => routeContentHeight - mapPaddingY - (floor - 1) * floorGap;
+
+    const lines: string[] = [];
+    for (const node of nodes) {
+      const x1 = laneX(node.lane);
+      const y1 = floorY(node.floor);
+      for (const id of node.links) {
+        const target = nodeById.get(id);
+        if (!target) continue;
+        const x2 = laneX(target.lane);
+        const y2 = floorY(target.floor);
+        const active = node.visited && (target.visited || choiceIds.has(target.id));
+        lines.push(`<line class="route-line${active ? ' active' : ''}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`);
+      }
+    }
+
+    const nodeEls = nodes.map((node) => {
+      const info = ROOM_INFO[node.type];
+      const debugSelectable = this.routeDebugMode && snapshot.currentId !== node.id;
+      const selectable = this.routeMapExpanded && (
+        (this.routeChoiceMode && choiceIds.has(node.id)) ||
+        debugSelectable
+      );
+      const cls = [
+        'route-node',
+        `route-${node.type}`,
+        hasRoomArt(node.type) ? 'has-art' : '',
+        node.visited ? 'visited' : '',
+        snapshot.currentId === node.id ? 'current' : '',
+        choiceIds.has(node.id) ? 'next' : '',
+        debugSelectable ? 'debug-selectable' : '',
+        selectable ? 'selectable' : '',
+      ].filter(Boolean).join(' ');
+      const x = laneX(node.lane);
+      const y = floorY(node.floor);
+      const icon = roomArtHtml(node.type, info.icon, 'route-node-art');
+      const showLabel = snapshot.currentId === node.id || choiceIds.has(node.id) || debugSelectable;
+      const label = showLabel ? `<span class="route-node-label">${ROOM_LABEL[node.type] || info.name}</span>` : '';
+      if (selectable) {
+        return `<button type="button" class="${cls}" data-route-id="${node.id}" data-floor="${node.floor}" style="left:${x}%; top:${y}px">${icon}${label}</button>`;
+      }
+      return `<div class="${cls}" data-floor="${node.floor}" style="left:${x}%; top:${y}px">${icon}${label}</div>`;
+    }).join('');
+
+    this.routeMap.classList.toggle('route-expanded', this.routeMapExpanded);
+    this.routeMap.classList.toggle('route-collapsed', !this.routeMapExpanded);
+
+    if (!this.routeMapExpanded) {
+      this.routeMap.innerHTML =
+        `<button class="route-map-toggle route-icon-btn">` +
+        `<span class="route-icon">🗺️</span><span class="route-progress">${progress}/${progressMax}</span>` +
+        `</button>`;
+      return;
+    }
+
+    this.routeMap.innerHTML =
+      `<div class="route-head">` +
+      `<strong>${this.routeDebugMode ? 'DEBUG 选关' : this.routeChoiceMode ? '选择下一关' : '路线图'}</strong><span>${progress}/${progressMax}</span>` +
+      (this.routeDebugMode
+        ? `<span class="route-debug-badge">任意节点</span><button class="route-map-close">×</button>`
+        : this.routeChoiceMode ? `<span class="route-must-pick">点击高亮节点</span>` : `<button class="route-map-close">×</button>`) +
+      `</div>` +
+      `<div class="route-canvas">` +
+      `<div class="route-map-content" style="height:${routeContentHeight}px">` +
+      `<svg viewBox="0 0 100 ${routeContentHeight}" preserveAspectRatio="none">${lines.join('')}</svg>${nodeEls}` +
+      `</div>` +
+      `</div>`;
+    this.centerRouteMapSoon();
+  }
+
+  showChoice(options: RouteNode[], depth: number = 0, sanityReduce: number = 0): void {
     const titleEl = document.getElementById('choice-title');
     const subEl = document.getElementById('choice-sub');
-    if (titleEl) titleEl.textContent = '选择路线';
-    if (subEl) subEl.textContent = '前方房间，选择其一';
+    if (titleEl) titleEl.textContent = '选择地图节点';
+    if (subEl) subEl.textContent = '路线会影响风险、补给和最终收益';
     this.choiceCards.innerHTML = '';
-    for (const t of options) {
-      const info = ROOM_INFO[t];
-      const cost = Math.max(0, sanityCostFor(t, depth) - sanityReduce);
+    for (const node of options) {
+      const info = ROOM_INFO[node.type];
+      const costDepth = node.depth || depth;
+      const cost = Math.max(0, sanityCostFor(node.type, costDepth) - sanityReduce);
       const costLine = cost > 0
         ? `<em style="color:#7d9bff">🧠 神智 -${cost}</em>`
         : `<em style="color:#7CFFB0">无神智消耗</em>`;
       const card = document.createElement('button');
       card.className = 'door-card';
-      card.innerHTML = `<span class="door-icon">${info.icon}</span><strong>${info.name}</strong><em>${info.hint}</em>${costLine}`;
+      const iconClass = hasRoomArt(node.type) ? 'door-icon has-art' : 'door-icon';
+      card.innerHTML =
+        `<span class="${iconClass}">${roomArtHtml(node.type, info.icon, 'door-icon-art')}</span><strong>${info.name}</strong>` +
+        `<em>第 ${node.floor}/10 节 · 路线 ${node.lane + 1}</em>` +
+        `<em style="color:#ffcf7a">风险：${node.risk}</em>` +
+        `<em style="color:#7CFFB0">收益：${node.reward}</em>` +
+        `<em>${info.hint}</em>${costLine}`;
       card.addEventListener('click', () => {
         this.choiceOverlay.style.display = 'none';
-        if (this.onChoice) this.onChoice(t);
+        if (this.onChoice) this.onChoice(node);
       });
       this.choiceCards.appendChild(card);
     }

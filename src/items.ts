@@ -74,6 +74,13 @@ export const TREASURES: { name: string; icon: string; rarity: Rarity; base: numb
   { name: '失落王冠', icon: '👑', rarity: 'legend', base: 360 },
 ];
 
+// 章节圣物（BOSS掉落，解锁下一章）
+export const RELICS: { name: string; icon: string; value: number }[] = [
+  { name: '法老黄金圣甲', icon: '🏆', value: 600 },
+  { name: '羽蛇神之心', icon: '💚', value: 800 },
+  { name: '十二金人残片', icon: '🥇', value: 1000 },
+];
+
 export function rollTreasure(depth: number): TreasureItem {
   const r = Math.random();
   const legendP = Math.min(0.1, 0.01 + depth * 0.004);

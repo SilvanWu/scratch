@@ -1,16 +1,25 @@
 import * as THREE from 'three';
 import { AudioFX } from './audio';
-import { Zombie } from './enemy';
+
+export interface AssistantTarget {
+  position: THREE.Vector3;
+  hit: () => void;
+}
 
 // 助手"夜枭"（策划案"助手"：2被动+1主动）
-// 被动1：搜索速度+35% ｜ 被动2：每进新房间回1神智 ｜ 主动(4键)：群体电击，每局3次
+// 被动1：搜索速度+35% ｜ 被动2：每进新房间回1神智 ｜ 自动普攻 ｜ 主动(E键)：群体电击，每局3次
 export class Assistant {
   mesh: THREE.Group;
+  readonly maxCharges: number = 3;
   charges: number = 3;
   readonly searchSpeedMult: number = 1.35;
   readonly sanityPerRoom: number = 1;
+  readonly autoAttackInterval: number = 1.35;
+  readonly autoAttackRange: number = 14;
+  readonly skillRange: number = 13;
   private wing: THREE.Mesh;
   private zapFx: { mesh: THREE.Mesh; age: number }[] = [];
+  private autoAttackTimer: number = 0.65;
 
   constructor(scene: THREE.Scene) {
     this.mesh = new THREE.Group();
@@ -44,6 +53,7 @@ export class Assistant {
     );
     this.mesh.position.lerp(target, Math.min(1, dt * 5));
     this.wing.rotation.z += dt * 3;
+    this.autoAttackTimer = Math.max(0, this.autoAttackTimer - dt);
 
     for (const fx of this.zapFx) {
       fx.age += dt;
@@ -58,35 +68,49 @@ export class Assistant {
     this.zapFx = this.zapFx.filter((f) => f.age <= 0.25);
   }
 
-  // 主动技能：电击10米内全部敌人。返回是否释放成功
-  zapAll(zombies: Zombie[], scene: THREE.Scene, audio: AudioFX, onHit: (z: Zombie) => void): boolean {
+  readyAutoAttack(): boolean {
+    return this.autoAttackTimer <= 0;
+  }
+
+  recoverCharge(amount: number = 1): number {
+    const before = this.charges;
+    this.charges = Math.min(this.maxCharges, this.charges + Math.max(0, amount));
+    return this.charges - before;
+  }
+
+  fireAutoAttack(scene: THREE.Scene, audio: AudioFX, targetPos: THREE.Vector3): void {
+    this.autoAttackTimer = this.autoAttackInterval;
+    this.drawBeam(scene, targetPos, 0.022, 0.72);
+    audio.searchTick();
+  }
+
+  castAoe(targets: AssistantTarget[], scene: THREE.Scene, audio: AudioFX): boolean {
     if (this.charges <= 0) return false;
-    let any = false;
-    for (const z of zombies) {
-      if (z.dead) continue;
-      if (z.mesh.position.distanceTo(this.mesh.position) < 12) {
-        any = true;
-        onHit(z);
-        // 电弧
-        const a = this.mesh.position;
-        const b = z.mesh.position.clone().setY(z.mesh.position.y + 1);
-        const mid = a.clone().add(b).multiplyScalar(0.5);
-        const len = a.distanceTo(b);
-        const beam = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.03, 0.03, len, 4),
-          new THREE.MeshBasicMaterial({ color: 0xaaf0ff, transparent: true, opacity: 0.9 })
-        );
-        beam.position.copy(mid);
-        beam.quaternion.setFromUnitVectors(
-          new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize()
-        );
-        scene.add(beam);
-        this.zapFx.push({ mesh: beam, age: 0 });
-      }
+    const hits = targets.filter((target) => target.position.distanceTo(this.mesh.position) <= this.skillRange);
+    if (hits.length === 0) return false;
+    for (const target of hits) {
+      target.hit();
+      this.drawBeam(scene, target.position, 0.035, 0.95);
     }
-    if (!any) return false;
     this.charges -= 1;
     audio.thunderLike();
     return true;
+  }
+
+  private drawBeam(scene: THREE.Scene, targetPos: THREE.Vector3, radius: number, opacity: number): void {
+    const a = this.mesh.position;
+    const b = targetPos.clone();
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    const len = Math.max(0.1, a.distanceTo(b));
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius, len, 4),
+      new THREE.MeshBasicMaterial({ color: 0xaaf0ff, transparent: true, opacity })
+    );
+    beam.position.copy(mid);
+    beam.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize()
+    );
+    scene.add(beam);
+    this.zapFx.push({ mesh: beam, age: 0 });
   }
 }
