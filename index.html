@@ -1955,6 +1955,13 @@ const ROOM_INFO                                                               = 
                 
  
 
+                                                      
+
+                           
+                                
+                  
+ 
+
 const WIDTH = 11;
 const HEIGHT = 5.2;
 
@@ -2035,6 +2042,91 @@ function getDoorTex(theme       )                      {
   return tex;
 }
 
+const routeDoorTexCache                                   = new Map();
+function getRouteDoorTex(theme       , type          )                      {
+  const key = `${theme.name}:${type}`;
+  const hit = routeDoorTexCache.get(key);
+  if (hit) return hit;
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 384;
+  const g = c.getContext('2d') ;
+  g.fillStyle = theme.gap;
+  g.fillRect(0, 0, c.width, c.height);
+  for (let i = 0; i < 900; i++) {
+    const shade = Math.random() < 0.55 ? 255 : 0;
+    g.fillStyle = `rgba(${shade},${shade},${shade},${0.015 + Math.random() * 0.035})`;
+    g.fillRect(Math.random() * c.width, Math.random() * c.height, 1 + Math.random() * 3, 1 + Math.random() * 3);
+  }
+
+  const sx = c.width / 256;
+  const sy = c.height / 384;
+  const x = (v        )         => v * sx;
+  const y = (v        )         => v * sy;
+  const line = (color = 'rgba(245,226,176,0.9)', width = 7)       => {
+    g.strokeStyle = color;
+    g.lineWidth = width;
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    g.fillStyle = color;
+  };
+
+  // Door-carving guide lines: every symbol sits inside the same rough doorway mark.
+  line('rgba(222,180,92,0.76)', 5);
+  g.strokeRect(x(26), y(24), x(204), y(336));
+  line('rgba(245,226,176,0.35)', 3);
+  g.strokeRect(x(42), y(42), x(172), y(300));
+  line('rgba(245,226,176,0.88)', 7);
+
+  const cx = x(128);
+  const cy = y(192);
+  const begin = ()       => g.beginPath();
+  const stroke = ()       => g.stroke();
+
+  if (type === 'supply') {
+    begin(); g.rect(x(72), y(190), x(112), y(74)); stroke();
+    begin(); g.moveTo(x(72), y(210)); g.lineTo(x(128), y(170)); g.lineTo(x(184), y(210)); stroke();
+    begin(); g.moveTo(cx, y(96)); g.lineTo(cx, y(152)); g.moveTo(x(100), y(124)); g.lineTo(x(156), y(124)); stroke();
+    begin(); g.moveTo(x(92), y(230)); g.lineTo(x(164), y(230)); stroke();
+  } else if (type === 'gem') {
+    begin(); g.moveTo(cx, y(86)); g.lineTo(x(172), y(136)); g.lineTo(cx, y(188)); g.lineTo(x(84), y(136)); g.closePath(); stroke();
+    begin(); g.moveTo(x(84), y(136)); g.lineTo(x(172), y(136)); g.moveTo(cx, y(86)); g.lineTo(cx, y(188)); stroke();
+    begin(); g.rect(x(70), y(224), x(116), y(52)); stroke();
+    begin(); g.moveTo(x(70), y(224)); g.quadraticCurveTo(cx, y(190), x(186), y(224)); stroke();
+  } else if (type === 'blessing') {
+    begin(); g.arc(cx, y(118), x(24), 0, Math.PI * 2); stroke();
+    begin(); g.moveTo(cx, y(150)); g.lineTo(cx, y(262)); stroke();
+    begin(); g.moveTo(x(116), y(184)); g.quadraticCurveTo(x(62), y(152), x(54), y(214)); g.quadraticCurveTo(x(84), y(202), x(106), y(226)); stroke();
+    begin(); g.moveTo(x(140), y(184)); g.quadraticCurveTo(x(194), y(152), x(202), y(214)); g.quadraticCurveTo(x(172), y(202), x(150), y(226)); stroke();
+    begin(); g.moveTo(x(92), y(288)); g.lineTo(x(164), y(288)); stroke();
+  } else if (type === 'curse') {
+    begin(); g.moveTo(x(78), y(266)); g.lineTo(cx, y(144)); g.lineTo(x(178), y(266)); g.closePath(); stroke();
+    begin(); g.moveTo(x(98), y(124)); g.quadraticCurveTo(x(70), y(80), x(52), y(116)); g.moveTo(x(158), y(124)); g.quadraticCurveTo(x(186), y(80), x(204), y(116)); stroke();
+    begin(); g.moveTo(cx, y(168)); g.quadraticCurveTo(x(106), y(208), cx, y(236)); g.quadraticCurveTo(x(150), y(210), cx, y(168)); stroke();
+  } else if (type === 'safehouse') {
+    begin(); g.arc(cx, y(132), x(56), Math.PI * 0.18, Math.PI * 1.82); stroke();
+    begin(); g.moveTo(x(92), y(274)); g.lineTo(x(164), y(224)); g.moveTo(x(164), y(274)); g.lineTo(x(92), y(224)); stroke();
+    begin(); g.moveTo(cx, y(184)); g.quadraticCurveTo(x(102), y(230), cx, y(258)); g.quadraticCurveTo(x(154), y(228), cx, y(184)); stroke();
+  } else if (type === 'shop') {
+    begin(); g.moveTo(cx, y(92)); g.lineTo(cx, y(268)); g.moveTo(x(76), y(132)); g.lineTo(x(180), y(132)); stroke();
+    begin(); g.moveTo(x(88), y(132)); g.lineTo(x(62), y(208)); g.lineTo(x(114), y(208)); g.closePath(); stroke();
+    begin(); g.moveTo(x(168), y(132)); g.lineTo(x(142), y(208)); g.lineTo(x(194), y(208)); g.closePath(); stroke();
+    begin(); g.arc(cx, y(296), x(24), 0, Math.PI * 2); stroke();
+  } else if (type === 'boss') {
+    begin(); g.moveTo(x(74), y(112)); g.lineTo(x(100), y(66)); g.lineTo(cx, y(108)); g.lineTo(x(156), y(66)); g.lineTo(x(182), y(112)); stroke();
+    begin(); g.moveTo(x(82), y(140)); g.quadraticCurveTo(cx, y(104), x(174), y(140)); g.lineTo(x(164), y(270)); g.quadraticCurveTo(cx, y(300), x(92), y(270)); g.closePath(); stroke();
+    begin(); g.moveTo(x(104), y(190)); g.lineTo(x(116), y(190)); g.moveTo(x(140), y(190)); g.lineTo(x(152), y(190)); stroke();
+    begin(); g.moveTo(cx, y(210)); g.lineTo(x(114), y(250)); g.lineTo(x(142), y(250)); g.closePath(); stroke();
+  } else {
+    begin(); g.moveTo(x(78), y(284)); g.lineTo(x(78), y(156)); g.quadraticCurveTo(cx, y(82), x(178), y(156)); g.lineTo(x(178), y(284)); stroke();
+    begin(); g.moveTo(cx, y(160)); g.lineTo(cx, y(282)); g.moveTo(x(100), y(220)); g.lineTo(x(156), y(220)); stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 2;
+  routeDoorTexCache.set(key, tex);
+  return tex;
+}
+
 class Dungeon {
   rooms         = [];
           scene             ;
@@ -2096,7 +2188,36 @@ class Dungeon {
     if (matchNodeDepth) this.depthCount = Math.max(0, live.depth - 1);
     live.visited = true;
     this.routeCurrentId = live.id;
-    return this.append(live.type);
+    const routeDoors = this.routeDoorChoicesFor(live);
+    return this.append(live.type, true, routeDoors);
+  }
+
+          routeDoorChoicesFor(current           )                    {
+    const byId = new Map(this.routeNodes.map((n) => [n.id, n]));
+    const targets = current.links
+      .map((id) => byId.get(id))
+      .filter((n)                 => !!n)
+      .sort((a, b) => a.lane - b.lane);
+
+    const choices                    = [];
+    const used = new Set                    ();
+    const naturalDirection = (target           )                     =>
+      target.lane < current.lane ? 'left' : target.lane > current.lane ? 'right' : 'center';
+
+    for (const target of targets) {
+      const direction = naturalDirection(target);
+      if (used.has(direction)) continue;
+      used.add(direction);
+      choices.push({ direction, node: target });
+    }
+
+    const remainingTargets = targets.filter((target) => !choices.some((choice) => choice.node.id === target.id));
+    const remainingDirections                       = ['left', 'center', 'right'].filter((dir) => !used.has(dir))                        ;
+    for (let i = 0; i < remainingTargets.length && i < remainingDirections.length; i++) {
+      choices.push({ direction: remainingDirections[i], node: remainingTargets[i] });
+    }
+
+    return choices;
   }
 
           availableRouteChoices()              {
@@ -2462,7 +2583,67 @@ class Dungeon {
     return '继续深入';
   }
 
-  append(type          , countDepth          = true)       {
+          addRouteDoor(
+    group             , theme       , choice                 ,
+    w        , zExit        , length        
+  )       {
+    const door = new THREE.Group();
+    door.userData.routeDoor = true;
+    door.userData.routeId = choice.node.id;
+    door.userData.routeType = choice.node.type;
+    door.userData.routeDirection = choice.direction;
+
+    const stoneMat = new THREE.MeshStandardMaterial({
+      color: theme.gap, roughness: 0.92,
+    });
+    const goldMat = new THREE.MeshStandardMaterial({
+      color: 0xd8b050, emissive: 0x3a2c08, metalness: 0.55, roughness: 0.38,
+    });
+    const panelMat = new THREE.MeshStandardMaterial({
+      map: getRouteDoorTex(theme, choice.node.type),
+      color: 0xbeb4a2,
+      roughness: 0.9,
+      side: THREE.DoubleSide,
+    });
+
+    const back = new THREE.Mesh(new THREE.BoxGeometry(2.76, 3.58, 0.08), stoneMat);
+    back.position.z = -0.03;
+    door.add(back);
+
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(2.36, 3.18), panelMat);
+    panel.position.z = 0.035;
+    door.add(panel);
+
+    const framePieces = [
+      { sx: 0.12, sy: 3.62, x: -1.42, y: 0 },
+      { sx: 0.12, sy: 3.62, x: 1.42, y: 0 },
+      { sx: 2.84, sy: 0.12, x: 0, y: 1.78 },
+      { sx: 2.84, sy: 0.10, x: 0, y: -1.78 },
+    ];
+    for (const p of framePieces) {
+      const piece = new THREE.Mesh(new THREE.BoxGeometry(p.sx, p.sy, 0.12), goldMat);
+      piece.position.set(p.x, p.y, 0.06);
+      door.add(piece);
+    }
+
+    const cap = new THREE.Mesh(new THREE.OctahedronGeometry(0.14), goldMat);
+    cap.position.set(0, 1.99, 0.08);
+    door.add(cap);
+
+    const sideZ = zExit + Math.min(5.4, Math.max(3.6, length * 0.32));
+    if (choice.direction === 'left') {
+      door.position.set(-w / 2 + 0.24, 1.82, sideZ);
+      door.rotation.y = Math.PI / 2;
+    } else if (choice.direction === 'right') {
+      door.position.set(w / 2 - 0.24, 1.82, sideZ);
+      door.rotation.y = -Math.PI / 2;
+    } else {
+      door.position.set(0, 1.82, zExit + 0.24);
+    }
+    group.add(door);
+  }
+
+  append(type          , countDepth          = true, routeDoors                    = [])       {
     if (countDepth) this.depthCount += 1;
     if (type === 'shop') this.lastShopDepth = this.depthCount;  // 记录商店深度（控制间隔）
     // 纵深加大（前后空间更大，左右宽度不变）
@@ -2497,62 +2678,13 @@ class Dungeon {
     wr.position.set(w / 2, HEIGHT / 2, zEntry - length / 2);
     group.add(wr);
 
-    // 端墙（带门洞：左右两块+门楣）
+    // 端墙默认保持完整；只有路线存在时才在对应墙面叠加石门刻纹。
     const doorW = 2.2;
-    const endWallSide = new THREE.BoxGeometry((w - doorW) / 2, HEIGHT, 0.4);
-    const el = new THREE.Mesh(endWallSide, wallMat);
-    el.position.set(-(doorW / 2 + (w - doorW) / 4), HEIGHT / 2, zExit);
-    group.add(el);
-    const er = new THREE.Mesh(endWallSide, wallMat);
-    er.position.set(doorW / 2 + (w - doorW) / 4, HEIGHT / 2, zExit);
-    group.add(er);
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(doorW, HEIGHT - 3.2, 0.4), wallMat);
-    lintel.position.set(0, HEIGHT - (HEIGHT - 3.2) / 2, zExit);
-    group.add(lintel);
-
-    // ===== 仪式感石门：雕花门框 + 鎏金浮雕双开门 =====
-    const goldMat = new THREE.MeshStandardMaterial({
-      color: 0xd8b050, emissive: 0x4a3408, metalness: 0.8, roughness: 0.3,
-    });
-    // 两侧雕花门柱
-    for (const side of [-1, 1]) {
-      const column = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.16, 0.2, 3.5, 8), wallMat
-      );
-      column.position.set(side * (doorW / 2 + 0.18), 1.75, zExit + 0.12);
-      group.add(column);
-      const capital = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.18, 0.45), goldMat);
-      capital.position.set(side * (doorW / 2 + 0.18), 3.45, zExit + 0.12);
-      group.add(capital);
-    }
-    // 门楣鎏金饰带 + 圣甲虫徽记
-    const band = new THREE.Mesh(new THREE.BoxGeometry(doorW + 0.7, 0.16, 0.1), goldMat);
-    band.position.set(0, 3.32, zExit + 0.22);
-    group.add(band);
-    const emblem = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), goldMat);
-    emblem.position.set(0, 3.62, zExit + 0.2);
-    group.add(emblem);
-    // 双开浮雕门板
-    const doorTex = getDoorTex(theme);
-    const doorMat = new THREE.MeshStandardMaterial({
-      map: doorTex, color: 0xb8b0a0, roughness: 0.8,
-    });
+    const endWall = new THREE.Mesh(new THREE.BoxGeometry(w, HEIGHT, 0.4), wallMat);
+    endWall.position.set(0, HEIGHT / 2, zExit);
+    group.add(endWall);
     const doorPanels               = [];
-    for (const side of [-1, 1]) {
-      const panel = new THREE.Mesh(
-        new THREE.BoxGeometry(doorW / 2 - 0.02, 3.15, 0.16), doorMat
-      );
-      panel.position.set(side * doorW / 4, 1.58, zExit);
-      group.add(panel);
-      doorPanels.push(panel);
-    }
-    // 门洞内的黑暗（门开后可见下一间的幽暗）
-    const dark = new THREE.Mesh(
-      new THREE.PlaneGeometry(doorW, 3.2),
-      new THREE.MeshBasicMaterial({ color: 0x000000 })
-    );
-    dark.position.set(0, 1.6, zExit - 0.35);
-    group.add(dark);
+    for (const choice of routeDoors) this.addRouteDoor(group, theme, choice, w, zExit, length);
 
     // 火把（带光源，限2个控制性能）
     const torches                     = [];
@@ -2779,6 +2911,7 @@ class Dungeon {
   // 石门开启：靠近时缓缓滑入墙内（带回调播放隆隆声）
   updateDoors(dt        , playerZ        , onRumble            )       {
     for (const room of this.rooms) {
+      if (room.doorPanels.length < 2) continue;
       if (room.doorProgress >= 1) continue;
       const dist = playerZ - room.zExit;
       if (dist < 6.5 && dist > -2) {
