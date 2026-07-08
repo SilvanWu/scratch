@@ -75,11 +75,13 @@ export class Game {
   private routePaused: boolean = false; // 展开路线图时暂停
   private debugRouteMode: boolean = false; // 调试选关：~ 开关，地图任意节点可进入
   private transitioning: boolean = false;
+  private transitionPhase: 'door' | 'fadeIn' | 'fadeOut' = 'fadeIn';
   private transitionNode: RouteNode | null = null;
   private transitionDebugJump: boolean = false;
   private transitionTimer: number = 0;
-  private readonly transitionHold: number = 0.08;
-  private readonly transitionFadeOut: number = 0.32;
+  private readonly transitionDoorOpen: number = 0.68;
+  private readonly transitionFadeIn: number = 0.14;
+  private readonly transitionFadeOut: number = 0.26;
 
   private state: GameState = 'moving';
   private currentRoom: Room | null = null;
@@ -351,31 +353,55 @@ export class Game {
     this.transitionNode = node;
     this.transitionDebugJump = debugJump;
     this.transitionTimer = 0;
-    this.hud.setRoomTransition(1, true);
-    this.startRouteNode(node, debugJump);
+    const doorFound = !debugJump && this.dungeon.beginRouteDoorOpen(this.currentRoom, node.id);
+    this.transitionPhase = doorFound ? 'door' : 'fadeIn';
+    this.hud.setRoomTransition(0, false);
+    if (doorFound) {
+      this.audio.doorRumble();
+    }
   }
 
   private updateRouteTransition(dt: number): void {
-    this.transitionTimer += dt;
-    const fadeOutAt = this.transitionHold;
-    const total = fadeOutAt + this.transitionFadeOut;
-
-    let alpha = 0;
-    if (this.transitionTimer < fadeOutAt) {
-      alpha = 1;
-    } else {
-      alpha = 1 - (this.transitionTimer - fadeOutAt) / this.transitionFadeOut;
+    const node = this.transitionNode;
+    if (!node) {
+      this.transitioning = false;
+      this.hud.setRoomTransition(0, false);
+      return;
     }
 
-    if (this.transitionTimer >= total) {
+    this.transitionTimer += dt;
+
+    if (this.transitionPhase === 'door') {
+      const done = this.dungeon.updateRouteDoorOpen(this.currentRoom, node.id, dt, this.transitionDoorOpen);
+      this.hud.setRoomTransition(0, false);
+      if (done) {
+        this.audio.doorOpen();
+        this.transitionPhase = 'fadeIn';
+        this.transitionTimer = 0;
+      }
+      return;
+    }
+
+    if (this.transitionPhase === 'fadeIn') {
+      const alpha = Math.min(1, this.transitionTimer / this.transitionFadeIn);
+      this.hud.setRoomTransition(alpha, true);
+      if (alpha >= 1) {
+        this.startRouteNode(node, this.transitionDebugJump);
+        this.transitionPhase = 'fadeOut';
+        this.transitionTimer = 0;
+      }
+      return;
+    }
+
+    const alpha = 1 - Math.min(1, this.transitionTimer / this.transitionFadeOut);
+    if (alpha <= 0) {
       this.transitioning = false;
       this.transitionNode = null;
       this.transitionDebugJump = false;
       this.hud.setRoomTransition(0, false);
       return;
     }
-
-    this.hud.setRoomTransition(Math.max(0, Math.min(1, alpha)), true);
+    this.hud.setRoomTransition(alpha, true);
   }
 
   private completeNode(message?: string): void {

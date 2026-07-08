@@ -1953,6 +1953,7 @@ const ROOM_INFO                                                               = 
                                         
                        
                 
+                                
  
 
                                                       
@@ -1960,6 +1961,15 @@ const ROOM_INFO                                                               = 
                            
                                 
                   
+ 
+
+                           
+                 
+                                
+                    
+                    
+                   
+                   
  
 
 const WIDTH = 11;
@@ -2586,8 +2596,9 @@ class Dungeon {
           addRouteDoor(
     group             , theme       , choice                 ,
     w        , zExit        , length        
-  )       {
+  )                  {
     const door = new THREE.Group();
+    const leaf = new THREE.Group();
     door.userData.routeDoor = true;
     door.userData.routeId = choice.node.id;
     door.userData.routeType = choice.node.type;
@@ -2606,13 +2617,20 @@ class Dungeon {
       side: THREE.DoubleSide,
     });
 
+    const opening = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.5, 3.28),
+      new THREE.MeshBasicMaterial({ color: 0x020101 })
+    );
+    opening.position.z = -0.055;
+    door.add(opening);
+
     const back = new THREE.Mesh(new THREE.BoxGeometry(2.76, 3.58, 0.08), stoneMat);
     back.position.z = -0.03;
-    door.add(back);
+    leaf.add(back);
 
     const panel = new THREE.Mesh(new THREE.PlaneGeometry(2.36, 3.18), panelMat);
     panel.position.z = 0.035;
-    door.add(panel);
+    leaf.add(panel);
 
     const framePieces = [
       { sx: 0.12, sy: 3.62, x: -1.42, y: 0 },
@@ -2623,12 +2641,13 @@ class Dungeon {
     for (const p of framePieces) {
       const piece = new THREE.Mesh(new THREE.BoxGeometry(p.sx, p.sy, 0.12), goldMat);
       piece.position.set(p.x, p.y, 0.06);
-      door.add(piece);
+      leaf.add(piece);
     }
 
     const cap = new THREE.Mesh(new THREE.OctahedronGeometry(0.14), goldMat);
     cap.position.set(0, 1.99, 0.08);
-    door.add(cap);
+    leaf.add(cap);
+    door.add(leaf);
 
     const sideZ = zExit + Math.min(5.4, Math.max(3.6, length * 0.32));
     if (choice.direction === 'left') {
@@ -2641,6 +2660,14 @@ class Dungeon {
       door.position.set(0, 1.82, zExit + 0.24);
     }
     group.add(door);
+    return {
+      nodeId: choice.node.id,
+      direction: choice.direction,
+      root: door,
+      leaf,
+      progress: 0,
+      opening: false,
+    };
   }
 
   append(type          , countDepth          = true, routeDoors                    = [])       {
@@ -2684,7 +2711,8 @@ class Dungeon {
     endWall.position.set(0, HEIGHT / 2, zExit);
     group.add(endWall);
     const doorPanels               = [];
-    for (const choice of routeDoors) this.addRouteDoor(group, theme, choice, w, zExit, length);
+    const routeDoorVisuals                    = [];
+    for (const choice of routeDoors) routeDoorVisuals.push(this.addRouteDoor(group, theme, choice, w, zExit, length));
 
     // 火把（带光源，限2个控制性能）
     const torches                     = [];
@@ -2893,6 +2921,7 @@ class Dungeon {
       doorProgress: 0,
       doorRumbled: false,
       doorW,
+      routeDoors: routeDoorVisuals,
     };
     this.rooms.push(room);
 
@@ -2906,6 +2935,35 @@ class Dungeon {
       });
     }
     return room;
+  }
+
+  beginRouteDoorOpen(room             , nodeId        )          {
+    if (!room) return false;
+    let found = false;
+    for (const door of room.routeDoors) {
+      const selected = door.nodeId === nodeId;
+      door.opening = selected;
+      if (selected) {
+        found = true;
+      } else {
+        door.progress = 0;
+        door.leaf.position.y = 0;
+      }
+    }
+    return found;
+  }
+
+  updateRouteDoorOpen(room             , nodeId        , dt        , duration        )          {
+    if (!room) return true;
+    const door = room.routeDoors.find((d) => d.nodeId === nodeId);
+    if (!door) return true;
+    door.opening = true;
+    door.progress = Math.min(1, door.progress + dt / Math.max(0.01, duration));
+    const t = door.progress;
+    const ease = 1 - Math.pow(1 - t, 3);
+    door.leaf.position.y = ease * 3.65;
+    door.leaf.rotation.z = Math.sin(ease * Math.PI) * 0.025;
+    return door.progress >= 1;
   }
 
   // 石门开启：靠近时缓缓滑入墙内（带回调播放隆隆声）
@@ -5425,11 +5483,13 @@ class Game {
           routePaused          = false; // 展开路线图时暂停
           debugRouteMode          = false; // 调试选关：~ 开关，地图任意节点可进入
           transitioning          = false;
+          transitionPhase                                = 'fadeIn';
           transitionNode                   = null;
           transitionDebugJump          = false;
           transitionTimer         = 0;
-                   transitionHold         = 0.08;
-                   transitionFadeOut         = 0.32;
+                   transitionDoorOpen         = 0.68;
+                   transitionFadeIn         = 0.14;
+                   transitionFadeOut         = 0.26;
 
           state            = 'moving';
           currentRoom              = null;
@@ -5701,31 +5761,55 @@ class Game {
     this.transitionNode = node;
     this.transitionDebugJump = debugJump;
     this.transitionTimer = 0;
-    this.hud.setRoomTransition(1, true);
-    this.startRouteNode(node, debugJump);
+    const doorFound = !debugJump && this.dungeon.beginRouteDoorOpen(this.currentRoom, node.id);
+    this.transitionPhase = doorFound ? 'door' : 'fadeIn';
+    this.hud.setRoomTransition(0, false);
+    if (doorFound) {
+      this.audio.doorRumble();
+    }
   }
 
           updateRouteTransition(dt        )       {
-    this.transitionTimer += dt;
-    const fadeOutAt = this.transitionHold;
-    const total = fadeOutAt + this.transitionFadeOut;
-
-    let alpha = 0;
-    if (this.transitionTimer < fadeOutAt) {
-      alpha = 1;
-    } else {
-      alpha = 1 - (this.transitionTimer - fadeOutAt) / this.transitionFadeOut;
+    const node = this.transitionNode;
+    if (!node) {
+      this.transitioning = false;
+      this.hud.setRoomTransition(0, false);
+      return;
     }
 
-    if (this.transitionTimer >= total) {
+    this.transitionTimer += dt;
+
+    if (this.transitionPhase === 'door') {
+      const done = this.dungeon.updateRouteDoorOpen(this.currentRoom, node.id, dt, this.transitionDoorOpen);
+      this.hud.setRoomTransition(0, false);
+      if (done) {
+        this.audio.doorOpen();
+        this.transitionPhase = 'fadeIn';
+        this.transitionTimer = 0;
+      }
+      return;
+    }
+
+    if (this.transitionPhase === 'fadeIn') {
+      const alpha = Math.min(1, this.transitionTimer / this.transitionFadeIn);
+      this.hud.setRoomTransition(alpha, true);
+      if (alpha >= 1) {
+        this.startRouteNode(node, this.transitionDebugJump);
+        this.transitionPhase = 'fadeOut';
+        this.transitionTimer = 0;
+      }
+      return;
+    }
+
+    const alpha = 1 - Math.min(1, this.transitionTimer / this.transitionFadeOut);
+    if (alpha <= 0) {
       this.transitioning = false;
       this.transitionNode = null;
       this.transitionDebugJump = false;
       this.hud.setRoomTransition(0, false);
       return;
     }
-
-    this.hud.setRoomTransition(Math.max(0, Math.min(1, alpha)), true);
+    this.hud.setRoomTransition(alpha, true);
   }
 
           completeNode(message         )       {

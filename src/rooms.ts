@@ -96,6 +96,7 @@ export interface Room {
   doorProgress: number;      // 0关 → 1全开
   doorRumbled: boolean;
   doorW: number;
+  routeDoors: RouteDoorVisual[];
 }
 
 type RouteDoorDirection = 'left' | 'center' | 'right';
@@ -103,6 +104,15 @@ type RouteDoorDirection = 'left' | 'center' | 'right';
 interface RouteDoorChoice {
   direction: RouteDoorDirection;
   node: RouteNode;
+}
+
+interface RouteDoorVisual {
+  nodeId: string;
+  direction: RouteDoorDirection;
+  root: THREE.Group;
+  leaf: THREE.Group;
+  progress: number;
+  opening: boolean;
 }
 
 const WIDTH = 11;
@@ -729,8 +739,9 @@ export class Dungeon {
   private addRouteDoor(
     group: THREE.Group, theme: Theme, choice: RouteDoorChoice,
     w: number, zExit: number, length: number
-  ): void {
+  ): RouteDoorVisual {
     const door = new THREE.Group();
+    const leaf = new THREE.Group();
     door.userData.routeDoor = true;
     door.userData.routeId = choice.node.id;
     door.userData.routeType = choice.node.type;
@@ -749,13 +760,20 @@ export class Dungeon {
       side: THREE.DoubleSide,
     });
 
+    const opening = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.5, 3.28),
+      new THREE.MeshBasicMaterial({ color: 0x020101 })
+    );
+    opening.position.z = -0.055;
+    door.add(opening);
+
     const back = new THREE.Mesh(new THREE.BoxGeometry(2.76, 3.58, 0.08), stoneMat);
     back.position.z = -0.03;
-    door.add(back);
+    leaf.add(back);
 
     const panel = new THREE.Mesh(new THREE.PlaneGeometry(2.36, 3.18), panelMat);
     panel.position.z = 0.035;
-    door.add(panel);
+    leaf.add(panel);
 
     const framePieces = [
       { sx: 0.12, sy: 3.62, x: -1.42, y: 0 },
@@ -766,12 +784,13 @@ export class Dungeon {
     for (const p of framePieces) {
       const piece = new THREE.Mesh(new THREE.BoxGeometry(p.sx, p.sy, 0.12), goldMat);
       piece.position.set(p.x, p.y, 0.06);
-      door.add(piece);
+      leaf.add(piece);
     }
 
     const cap = new THREE.Mesh(new THREE.OctahedronGeometry(0.14), goldMat);
     cap.position.set(0, 1.99, 0.08);
-    door.add(cap);
+    leaf.add(cap);
+    door.add(leaf);
 
     const sideZ = zExit + Math.min(5.4, Math.max(3.6, length * 0.32));
     if (choice.direction === 'left') {
@@ -784,6 +803,14 @@ export class Dungeon {
       door.position.set(0, 1.82, zExit + 0.24);
     }
     group.add(door);
+    return {
+      nodeId: choice.node.id,
+      direction: choice.direction,
+      root: door,
+      leaf,
+      progress: 0,
+      opening: false,
+    };
   }
 
   append(type: RoomType, countDepth: boolean = true, routeDoors: RouteDoorChoice[] = []): Room {
@@ -827,7 +854,8 @@ export class Dungeon {
     endWall.position.set(0, HEIGHT / 2, zExit);
     group.add(endWall);
     const doorPanels: THREE.Mesh[] = [];
-    for (const choice of routeDoors) this.addRouteDoor(group, theme, choice, w, zExit, length);
+    const routeDoorVisuals: RouteDoorVisual[] = [];
+    for (const choice of routeDoors) routeDoorVisuals.push(this.addRouteDoor(group, theme, choice, w, zExit, length));
 
     // 火把（带光源，限2个控制性能）
     const torches: THREE.PointLight[] = [];
@@ -1036,6 +1064,7 @@ export class Dungeon {
       doorProgress: 0,
       doorRumbled: false,
       doorW,
+      routeDoors: routeDoorVisuals,
     };
     this.rooms.push(room);
 
@@ -1049,6 +1078,35 @@ export class Dungeon {
       });
     }
     return room;
+  }
+
+  beginRouteDoorOpen(room: Room | null, nodeId: string): boolean {
+    if (!room) return false;
+    let found = false;
+    for (const door of room.routeDoors) {
+      const selected = door.nodeId === nodeId;
+      door.opening = selected;
+      if (selected) {
+        found = true;
+      } else {
+        door.progress = 0;
+        door.leaf.position.y = 0;
+      }
+    }
+    return found;
+  }
+
+  updateRouteDoorOpen(room: Room | null, nodeId: string, dt: number, duration: number): boolean {
+    if (!room) return true;
+    const door = room.routeDoors.find((d) => d.nodeId === nodeId);
+    if (!door) return true;
+    door.opening = true;
+    door.progress = Math.min(1, door.progress + dt / Math.max(0.01, duration));
+    const t = door.progress;
+    const ease = 1 - Math.pow(1 - t, 3);
+    door.leaf.position.y = ease * 3.65;
+    door.leaf.rotation.z = Math.sin(ease * Math.PI) * 0.025;
+    return door.progress >= 1;
   }
 
   // 石门开启：靠近时缓缓滑入墙内（带回调播放隆隆声）
