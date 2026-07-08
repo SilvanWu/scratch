@@ -357,7 +357,28 @@ export class Game {
     this.transitionPhase = doorFound ? 'door' : 'fadeIn';
     this.hud.setRoomTransition(0, false);
     if (doorFound) {
+      this.focusRouteDoorCamera(node.id, 0.2);
       this.audio.doorRumble();
+    }
+  }
+
+  private focusRouteDoorCamera(nodeId: string, dt: number): void {
+    const view = this.dungeon.routeDoorView(this.currentRoom, nodeId);
+    if (!view) return;
+    const sideX = view.direction === 'left' ? 1.35 : view.direction === 'right' ? -1.35 : 0.9;
+    const camPos = new THREE.Vector3(
+      this.player.position.x + sideX,
+      this.player.position.y + 2.75,
+      this.player.position.z + 4.2
+    );
+    const lookAt = view.center.clone();
+    lookAt.y = Math.max(1.8, lookAt.y);
+    this.camera.position.lerp(camPos, Math.min(1, dt * 8));
+    this.camera.lookAt(lookAt);
+    const targetFov = view.direction === 'center' ? this.player.hipFov : 76;
+    if (Math.abs(this.camera.fov - targetFov) > 0.2) {
+      this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 8);
+      this.camera.updateProjectionMatrix();
     }
   }
 
@@ -372,6 +393,7 @@ export class Game {
     this.transitionTimer += dt;
 
     if (this.transitionPhase === 'door') {
+      this.focusRouteDoorCamera(node.id, dt);
       const done = this.dungeon.updateRouteDoorOpen(this.currentRoom, node.id, dt, this.transitionDoorOpen);
       this.hud.setRoomTransition(0, false);
       if (done) {

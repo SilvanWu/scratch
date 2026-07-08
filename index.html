@@ -2618,10 +2618,10 @@ class Dungeon {
     });
 
     const opening = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.5, 3.28),
-      new THREE.MeshBasicMaterial({ color: 0x020101 })
+      new THREE.PlaneGeometry(2.56, 3.34),
+      new THREE.MeshBasicMaterial({ color: 0x000000 })
     );
-    opening.position.z = -0.055;
+    opening.position.z = 0.018;
     door.add(opening);
 
     const back = new THREE.Mesh(new THREE.BoxGeometry(2.76, 3.58, 0.08), stoneMat);
@@ -2649,7 +2649,7 @@ class Dungeon {
     leaf.add(cap);
     door.add(leaf);
 
-    const sideZ = zExit + Math.min(5.4, Math.max(3.6, length * 0.32));
+    const sideZ = zExit + 3.0;
     if (choice.direction === 'left') {
       door.position.set(-w / 2 + 0.24, 1.82, sideZ);
       door.rotation.y = Math.PI / 2;
@@ -2948,9 +2948,20 @@ class Dungeon {
       } else {
         door.progress = 0;
         door.leaf.position.y = 0;
+        door.leaf.rotation.z = 0;
       }
     }
     return found;
+  }
+
+  routeDoorView(room             , nodeId        )                                                                  {
+    if (!room) return null;
+    const door = room.routeDoors.find((d) => d.nodeId === nodeId);
+    if (!door) return null;
+    const center = new THREE.Vector3();
+    door.root.getWorldPosition(center);
+    center.y += 0.35;
+    return { center, direction: door.direction };
   }
 
   updateRouteDoorOpen(room             , nodeId        , dt        , duration        )          {
@@ -5765,7 +5776,28 @@ class Game {
     this.transitionPhase = doorFound ? 'door' : 'fadeIn';
     this.hud.setRoomTransition(0, false);
     if (doorFound) {
+      this.focusRouteDoorCamera(node.id, 0.2);
       this.audio.doorRumble();
+    }
+  }
+
+          focusRouteDoorCamera(nodeId        , dt        )       {
+    const view = this.dungeon.routeDoorView(this.currentRoom, nodeId);
+    if (!view) return;
+    const sideX = view.direction === 'left' ? 1.35 : view.direction === 'right' ? -1.35 : 0.9;
+    const camPos = new THREE.Vector3(
+      this.player.position.x + sideX,
+      this.player.position.y + 2.75,
+      this.player.position.z + 4.2
+    );
+    const lookAt = view.center.clone();
+    lookAt.y = Math.max(1.8, lookAt.y);
+    this.camera.position.lerp(camPos, Math.min(1, dt * 8));
+    this.camera.lookAt(lookAt);
+    const targetFov = view.direction === 'center' ? this.player.hipFov : 76;
+    if (Math.abs(this.camera.fov - targetFov) > 0.2) {
+      this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 8);
+      this.camera.updateProjectionMatrix();
     }
   }
 
@@ -5780,6 +5812,7 @@ class Game {
     this.transitionTimer += dt;
 
     if (this.transitionPhase === 'door') {
+      this.focusRouteDoorCamera(node.id, dt);
       const done = this.dungeon.updateRouteDoorOpen(this.currentRoom, node.id, dt, this.transitionDoorOpen);
       this.hud.setRoomTransition(0, false);
       if (done) {

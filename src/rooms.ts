@@ -761,10 +761,10 @@ export class Dungeon {
     });
 
     const opening = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.5, 3.28),
-      new THREE.MeshBasicMaterial({ color: 0x020101 })
+      new THREE.PlaneGeometry(2.56, 3.34),
+      new THREE.MeshBasicMaterial({ color: 0x000000 })
     );
-    opening.position.z = -0.055;
+    opening.position.z = 0.018;
     door.add(opening);
 
     const back = new THREE.Mesh(new THREE.BoxGeometry(2.76, 3.58, 0.08), stoneMat);
@@ -792,7 +792,7 @@ export class Dungeon {
     leaf.add(cap);
     door.add(leaf);
 
-    const sideZ = zExit + Math.min(5.4, Math.max(3.6, length * 0.32));
+    const sideZ = zExit + 3.0;
     if (choice.direction === 'left') {
       door.position.set(-w / 2 + 0.24, 1.82, sideZ);
       door.rotation.y = Math.PI / 2;
@@ -1091,9 +1091,20 @@ export class Dungeon {
       } else {
         door.progress = 0;
         door.leaf.position.y = 0;
+        door.leaf.rotation.z = 0;
       }
     }
     return found;
+  }
+
+  routeDoorView(room: Room | null, nodeId: string): { center: THREE.Vector3; direction: RouteDoorDirection } | null {
+    if (!room) return null;
+    const door = room.routeDoors.find((d) => d.nodeId === nodeId);
+    if (!door) return null;
+    const center = new THREE.Vector3();
+    door.root.getWorldPosition(center);
+    center.y += 0.35;
+    return { center, direction: door.direction };
   }
 
   updateRouteDoorOpen(room: Room | null, nodeId: string, dt: number, duration: number): boolean {
