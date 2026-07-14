@@ -1481,8 +1481,14 @@ export class HUD {
     const visibleIds = new Set(snapshot.visibleIds);
     const revealedTypeIds = new Set(snapshot.revealedTypeIds);
     const choiceIds = new Set(snapshot.choiceIds);
-    const gridGap = 36;
-    const mapPadding = 42;
+    const previewTitle = document.querySelector<HTMLElement>('.route-choice-map-head strong');
+    if (previewTitle) {
+      previewTitle.textContent = snapshot.visibilityMode === 'fog'
+        ? '战争迷雾'
+        : snapshot.visibilityMode === 'surveyed' ? '勘测地图' : '全解锁地图';
+    }
+    const gridGap = 32;
+    const mapPadding = 36;
     const mapWidth = mapPadding * 2 + Math.max(1, snapshot.maxX - snapshot.minX) * gridGap;
     const routeContentHeight = mapPadding * 2 + Math.max(1, snapshot.maxY - snapshot.minY) * gridGap;
     const mapX = (x: number): number => mapPadding + (x - snapshot.minX) * gridGap;

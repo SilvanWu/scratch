@@ -7187,8 +7187,14 @@ class HUD {
     const visibleIds = new Set(snapshot.visibleIds);
     const revealedTypeIds = new Set(snapshot.revealedTypeIds);
     const choiceIds = new Set(snapshot.choiceIds);
-    const gridGap = 36;
-    const mapPadding = 42;
+    const previewTitle = document.querySelector             ('.route-choice-map-head strong');
+    if (previewTitle) {
+      previewTitle.textContent = snapshot.visibilityMode === 'fog'
+        ? '战争迷雾'
+        : snapshot.visibilityMode === 'surveyed' ? '勘测地图' : '全解锁地图';
+    }
+    const gridGap = 32;
+    const mapPadding = 36;
     const mapWidth = mapPadding * 2 + Math.max(1, snapshot.maxX - snapshot.minX) * gridGap;
     const routeContentHeight = mapPadding * 2 + Math.max(1, snapshot.maxY - snapshot.minY) * gridGap;
     const mapX = (x        )         => mapPadding + (x - snapshot.minX) * gridGap;
@@ -8147,9 +8153,13 @@ class Game {
 
     const visibleIds = new Set        ();
     for (const node of snapshot.nodes) {
-      if (!node.visited && node.id !== snapshot.currentId) continue;
-      visibleIds.add(node.id);
-      for (const linkedId of node.links) visibleIds.add(linkedId);
+      if (node.visited || node.id === snapshot.currentId) visibleIds.add(node.id);
+    }
+    const currentNode = snapshot.currentId
+      ? snapshot.nodes.find((node) => node.id === snapshot.currentId)
+      : null;
+    if (currentNode) {
+      for (const linkedId of currentNode.links) visibleIds.add(linkedId);
     }
     for (const node of snapshot.nodes) {
       if (node.type === 'boss' || node.type === 'exit') visibleIds.add(node.id);

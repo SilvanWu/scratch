@@ -378,9 +378,13 @@ export class Game {
 
     const visibleIds = new Set<string>();
     for (const node of snapshot.nodes) {
-      if (!node.visited && node.id !== snapshot.currentId) continue;
-      visibleIds.add(node.id);
-      for (const linkedId of node.links) visibleIds.add(linkedId);
+      if (node.visited || node.id === snapshot.currentId) visibleIds.add(node.id);
+    }
+    const currentNode = snapshot.currentId
+      ? snapshot.nodes.find((node) => node.id === snapshot.currentId)
+      : null;
+    if (currentNode) {
+      for (const linkedId of currentNode.links) visibleIds.add(linkedId);
     }
     for (const node of snapshot.nodes) {
       if (node.type === 'boss' || node.type === 'exit') visibleIds.add(node.id);
