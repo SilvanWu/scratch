@@ -371,9 +371,9 @@ export class Game {
     if (surveyed) {
       return {
         ...snapshot,
-        visibilityMode: 'surveyed',
+        visibilityMode: 'full',
         visibleIds: allIds,
-        revealedTypeIds: Array.from(revealedTypeIds),
+        revealedTypeIds: allIds,
       };
     }
 
@@ -1486,10 +1486,34 @@ export class Game {
     }
   }
 
-  // 准星（画面中心）当前是否指向敌人（含 BOSS）——用于手动瞄准时按需开火
+  private aimAssistHeadNDC(): THREE.Vector2 | null {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const radiusPx = Math.max(34, Math.min(64, Math.min(rect.width, rect.height) * 0.115));
+    let best: { ndc: THREE.Vector2; screenDistance: number; worldDistance: number } | null = null;
+    const world = new THREE.Vector3();
+    const consider = (head: THREE.Object3D): void => {
+      head.getWorldPosition(world);
+      const projected = world.clone().project(this.camera);
+      if (projected.z < -1 || projected.z > 1) return;
+      const screenDistance = Math.hypot(projected.x * rect.width * 0.5, projected.y * rect.height * 0.5);
+      if (screenDistance > radiusPx) return;
+      const worldDistance = world.distanceTo(this.camera.position);
+      if (!best || screenDistance < best.screenDistance - 0.5 ||
+          (Math.abs(screenDistance - best.screenDistance) <= 0.5 && worldDistance < best.worldDistance)) {
+        best = { ndc: new THREE.Vector2(projected.x, projected.y), screenDistance, worldDistance };
+      }
+    };
+    for (const zombie of this.zombies.zombies) {
+      if (!zombie.dead) consider(zombie.head);
+    }
+    if (this.boss && !this.boss.dead) consider(this.boss.head);
+    return best ? best.ndc : null;
+  }
+
+  // ADS 时准星直接命中敌人，或头部进入吸附范围，都会持续开火。
   private crosshairOnEnemy(): boolean {
     this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
-    return this.raycaster.intersectObjects(this.allTargets(), false).length > 0;
+    return this.raycaster.intersectObjects(this.allTargets(), false).length > 0 || this.aimAssistHeadNDC() !== null;
   }
 
   // ===== 手动射击（ADS）：从画面中心射出，落点为摄像机中心 =====
@@ -1501,9 +1525,10 @@ export class Game {
     this.player.fire(this.audio);
     const weapon = this.player.weapon;
     const targets = this.allTargets();
+    const assistedHeadNDC = this.aimAssistHeadNDC();
 
     for (let p = 0; p < weapon.pellets; p++) {
-      const ndc = new THREE.Vector2(0, 0);  // 画面中心
+      const ndc = assistedHeadNDC ? assistedHeadNDC.clone() : new THREE.Vector2(0, 0);
       if (weapon.pellets > 1) {
         ndc.x += (Math.random() - 0.5) * weapon.spread * 2;
         ndc.y += (Math.random() - 0.5) * weapon.spread * 2;

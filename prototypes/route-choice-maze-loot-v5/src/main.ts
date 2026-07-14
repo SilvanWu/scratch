@@ -91,7 +91,7 @@ function syncDeveloperMapMenu(): void {
     ? '当前：旧版全解锁地图与房间类型'
     : selectedMapMode === 'fog'
       ? '当前：忽略存档，强制使用战争迷雾'
-      : '当前：首次迷雾 / 通关后隐藏未探索房型';
+      : '当前：首次迷雾 / 通关后完整地图';
 }
 
 function setDeveloperMapMenuOpen(open: boolean): void {
@@ -166,6 +166,26 @@ homeSettingsBtn.addEventListener('click', (e) => {
   homeSettingsPanel.classList.toggle('open');
 });
 homeSettingsPanel.addEventListener('click', (e) => e.stopPropagation());
+const clearSaveBtn = document.getElementById('clear-save-btn') as HTMLButtonElement;
+let clearSaveArmed = false;
+let clearSaveTimer = 0;
+clearSaveBtn.addEventListener('click', () => {
+  if (!clearSaveArmed) {
+    clearSaveArmed = true;
+    clearSaveBtn.classList.add('armed');
+    clearSaveBtn.textContent = '再次点击确认清除';
+    window.clearTimeout(clearSaveTimer);
+    clearSaveTimer = window.setTimeout(() => {
+      clearSaveArmed = false;
+      clearSaveBtn.classList.remove('armed');
+      clearSaveBtn.textContent = '清除存档';
+    }, 3500);
+    return;
+  }
+  window.clearTimeout(clearSaveTimer);
+  meta.clearSave();
+  location.reload();
+});
 syncVolumeControls();
 audio.startAmbient();
 

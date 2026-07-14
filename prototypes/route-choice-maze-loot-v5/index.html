@@ -803,6 +803,12 @@
     box-shadow: 0 10px 28px rgba(0,0,0,.62);
   }
   #home-settings-panel.open { display: flex; }
+  #clear-save-btn {
+    width: 100%; padding: 9px 12px; border-radius: 7px; cursor: pointer;
+    border: 1px solid rgba(255,92,92,.48); background: rgba(86,22,28,.42);
+    color: #ffb4b4; font-size: 13px; font-weight: 800;
+  }
+  #clear-save-btn.armed { background: #8d2029; border-color: #ff7676; color: #fff; }
   .settings-panel-title {
     font-size: 15px; color: #ffe4a0; font-weight: 900; text-align: left;
   }
@@ -1317,6 +1323,7 @@
       <span>音效音量</span><strong id="home-sfx-val">90%</strong>
     </label>
     <input id="home-sfx-slider" class="setting-slider" type="range" min="0" max="1" step="0.01" value="0.9">
+    <button id="clear-save-btn" type="button">清除存档</button>
   </div>
   <h1>古墓不让进</h1>
   <div class="sub">轻射击 PVE 搜打撤 · 地图路线原型 ｜ 竖屏适配 · 触屏可玩</div>
@@ -1932,6 +1939,12 @@ class Meta {
   save()       {
     try {
       localStorage.setItem(KEY, JSON.stringify(this.data));
+    } catch (e) { /* ignore */ }
+  }
+
+  clearSave()       {
+    try {
+      localStorage.removeItem(KEY);
     } catch (e) { /* ignore */ }
   }
 
@@ -8150,9 +8163,9 @@ class Game {
     if (surveyed) {
       return {
         ...snapshot,
-        visibilityMode: 'surveyed',
+        visibilityMode: 'full',
         visibleIds: allIds,
-        revealedTypeIds: Array.from(revealedTypeIds),
+        revealedTypeIds: allIds,
       };
     }
 
@@ -9265,10 +9278,34 @@ class Game {
     }
   }
 
-  // 准星（画面中心）当前是否指向敌人（含 BOSS）——用于手动瞄准时按需开火
+          aimAssistHeadNDC()                       {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const radiusPx = Math.max(34, Math.min(64, Math.min(rect.width, rect.height) * 0.115));
+    let best                                                                               = null;
+    const world = new THREE.Vector3();
+    const consider = (head                )       => {
+      head.getWorldPosition(world);
+      const projected = world.clone().project(this.camera);
+      if (projected.z < -1 || projected.z > 1) return;
+      const screenDistance = Math.hypot(projected.x * rect.width * 0.5, projected.y * rect.height * 0.5);
+      if (screenDistance > radiusPx) return;
+      const worldDistance = world.distanceTo(this.camera.position);
+      if (!best || screenDistance < best.screenDistance - 0.5 ||
+          (Math.abs(screenDistance - best.screenDistance) <= 0.5 && worldDistance < best.worldDistance)) {
+        best = { ndc: new THREE.Vector2(projected.x, projected.y), screenDistance, worldDistance };
+      }
+    };
+    for (const zombie of this.zombies.zombies) {
+      if (!zombie.dead) consider(zombie.head);
+    }
+    if (this.boss && !this.boss.dead) consider(this.boss.head);
+    return best ? best.ndc : null;
+  }
+
+  // ADS 时准星直接命中敌人，或头部进入吸附范围，都会持续开火。
           crosshairOnEnemy()          {
     this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
-    return this.raycaster.intersectObjects(this.allTargets(), false).length > 0;
+    return this.raycaster.intersectObjects(this.allTargets(), false).length > 0 || this.aimAssistHeadNDC() !== null;
   }
 
   // ===== 手动射击（ADS）：从画面中心射出，落点为摄像机中心 =====
@@ -9280,9 +9317,10 @@ class Game {
     this.player.fire(this.audio);
     const weapon = this.player.weapon;
     const targets = this.allTargets();
+    const assistedHeadNDC = this.aimAssistHeadNDC();
 
     for (let p = 0; p < weapon.pellets; p++) {
-      const ndc = new THREE.Vector2(0, 0);  // 画面中心
+      const ndc = assistedHeadNDC ? assistedHeadNDC.clone() : new THREE.Vector2(0, 0);
       if (weapon.pellets > 1) {
         ndc.x += (Math.random() - 0.5) * weapon.spread * 2;
         ndc.y += (Math.random() - 0.5) * weapon.spread * 2;
@@ -9904,7 +9942,7 @@ function syncDeveloperMapMenu()       {
     ? '当前：旧版全解锁地图与房间类型'
     : selectedMapMode === 'fog'
       ? '当前：忽略存档，强制使用战争迷雾'
-      : '当前：首次迷雾 / 通关后隐藏未探索房型';
+      : '当前：首次迷雾 / 通关后完整地图';
 }
 
 function setDeveloperMapMenuOpen(open         )       {
@@ -9979,6 +10017,26 @@ homeSettingsBtn.addEventListener('click', (e) => {
   homeSettingsPanel.classList.toggle('open');
 });
 homeSettingsPanel.addEventListener('click', (e) => e.stopPropagation());
+const clearSaveBtn = document.getElementById('clear-save-btn')                     ;
+let clearSaveArmed = false;
+let clearSaveTimer = 0;
+clearSaveBtn.addEventListener('click', () => {
+  if (!clearSaveArmed) {
+    clearSaveArmed = true;
+    clearSaveBtn.classList.add('armed');
+    clearSaveBtn.textContent = '再次点击确认清除';
+    window.clearTimeout(clearSaveTimer);
+    clearSaveTimer = window.setTimeout(() => {
+      clearSaveArmed = false;
+      clearSaveBtn.classList.remove('armed');
+      clearSaveBtn.textContent = '清除存档';
+    }, 3500);
+    return;
+  }
+  window.clearTimeout(clearSaveTimer);
+  meta.clearSave();
+  location.reload();
+});
 syncVolumeControls();
 audio.startAmbient();
 

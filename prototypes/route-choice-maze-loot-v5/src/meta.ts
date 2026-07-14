@@ -105,6 +105,12 @@ export class Meta {
     } catch (e) { /* ignore */ }
   }
 
+  clearSave(): void {
+    try {
+      localStorage.removeItem(KEY);
+    } catch (e) { /* ignore */ }
+  }
+
   spend(cost: number): boolean {
     return this.spendResources(cost, 0);
   }
