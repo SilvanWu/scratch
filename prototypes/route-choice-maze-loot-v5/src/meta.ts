@@ -7,6 +7,7 @@ export interface MetaData {
   extracts: number;
   checkpoint: number;
   chaptersCleared: number;
+  surveyedMapChapters: number[];
   backpackLv: number;
   shotgunOwned: boolean;
   weaponCalibrationLv: number;
@@ -68,7 +69,7 @@ export class Meta {
   constructor() {
     const defaults: MetaData = {
       bank: 0, relicMarks: 0, bestDepth: 0, runs: 0, extracts: 0, checkpoint: 0,
-      chaptersCleared: 0, backpackLv: 0, shotgunOwned: false,
+      chaptersCleared: 0, surveyedMapChapters: [], backpackLv: 0, shotgunOwned: false,
       weaponCalibrationLv: 0, magLv: 0, shieldCapLv: 0,
       hpLv: 0, sanityLv: 0, reloadLv: 0,
       assistantOwned: false, collection: [],
@@ -88,6 +89,10 @@ export class Meta {
           this.data.relicMarks = Math.max(0, Number(this.data.relicMarks || 0));
           if (!Array.isArray(this.data.relicMarkCollections)) this.data.relicMarkCollections = [];
           if (!Array.isArray(this.data.bossMarkChapters)) this.data.bossMarkChapters = [];
+          if (!Array.isArray(this.data.surveyedMapChapters)) this.data.surveyedMapChapters = [];
+          for (let chapter = 1; chapter <= this.data.chaptersCleared; chapter++) {
+            if (!this.data.surveyedMapChapters.includes(chapter)) this.data.surveyedMapChapters.push(chapter);
+          }
           this.data.specialGoldPity = Math.max(0, Number(this.data.specialGoldPity || 0));
         }
       }

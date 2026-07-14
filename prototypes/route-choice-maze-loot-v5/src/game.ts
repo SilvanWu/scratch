@@ -83,7 +83,7 @@ export class Game {
   private routePaused: boolean = false; // 展开路线图时暂停
   private developerPaused: boolean = false;
   private mapVisibilityMode: 'progression' | 'full';
-  private readonly chaptersClearedAtRunStart: number;
+  private readonly surveyedChaptersAtRunStart: Set<number>;
   private transitioning: boolean = false;
   private transitionPhase: 'door' | 'fadeIn' | 'fadeOut' = 'fadeIn';
   private transitionNode: RouteNode | null = null;
@@ -138,7 +138,10 @@ export class Game {
     this.meta = meta;
     this.audio = audio;
     this.mapVisibilityMode = mapVisibilityMode;
-    this.chaptersClearedAtRunStart = meta.data.chaptersCleared;
+    this.surveyedChaptersAtRunStart = new Set(meta.data.surveyedMapChapters);
+    for (let chapter = 1; chapter <= meta.data.chaptersCleared; chapter++) {
+      this.surveyedChaptersAtRunStart.add(chapter);
+    }
     const backpackConfig = BACKPACK_UPGRADES[meta.data.backpackLv] || BACKPACK_UPGRADES[0];
     this.bag = new Backpack(backpackConfig.cols, backpackConfig.rows);
 
@@ -265,14 +268,14 @@ export class Game {
     };
     this.hud.onExtract = (leave: boolean) => {
       if (leave) {
-        this.endRun(true, '撤离成功');
+        this.endRun(true, '撤离成功', true);
       } else {
         this.offerPact();
       }
     };
     this.hud.onExitConfirm = (leave: boolean) => {
       if (leave) {
-        this.endRun(true, '撤离成功');
+        this.endRun(true, '撤离成功', true);
       } else {
         this.state = 'interact';
         this.enableRouteChoiceFromMap();
@@ -353,7 +356,7 @@ export class Game {
     }
 
     const chapter = Math.floor(snapshot.segmentStartDepth / 30) + 1;
-    const surveyed = chapter <= this.chaptersClearedAtRunStart;
+    const surveyed = this.surveyedChaptersAtRunStart.has(chapter);
     const revealedTypeIds = new Set<string>();
     for (const node of snapshot.nodes) {
       if (node.visited || node.id === snapshot.currentId || snapshot.choiceIds.includes(node.id)) {
@@ -595,12 +598,23 @@ export class Game {
     }, true, '🩸 深入契约', '强力增益+永久代价，可婉拒');
   }
 
-  private endRun(extracted: boolean, title: string): void {
+  private chapterForDepth(depth: number): number {
+    return Math.floor(Math.max(0, depth) / 30) + 1;
+  }
+
+  private endRun(extracted: boolean, title: string, surveyChapter: boolean = false): void {
     this.state = 'over';
     const v = this.bag.totalValue;
     const payout = Math.round(v * this.lootValueMult) + this.bag.coins;  // 战利品价值 + 局内金币
     const depth = this.dungeon.currentDepth;
     if (extracted) {
+      if (surveyChapter) {
+        const chapter = this.chapterForDepth(depth);
+        if (!this.meta.data.surveyedMapChapters.includes(chapter)) {
+          this.meta.data.surveyedMapChapters.push(chapter);
+          this.meta.data.surveyedMapChapters.sort((a, b) => a - b);
+        }
+      }
       this.meta.data.bank += payout;
       this.meta.data.extracts += 1;
       for (const item of this.bag.items) {
@@ -1144,7 +1158,7 @@ export class Game {
   private onBossKilled(): void {
     if (!this.boss) return;
     this.kills += 1;
-    const chapter = Math.ceil(this.dungeon.currentDepth / 30);
+    const chapter = this.chapterForDepth(this.dungeon.currentDepth);
     const firstChapterClear = chapter > this.meta.data.chaptersCleared;
     const firstChapterMark = !this.meta.data.bossMarkChapters.includes(chapter);
     if (firstChapterClear) {

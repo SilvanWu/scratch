@@ -1833,6 +1833,7 @@ class AudioFX {
                    
                      
                           
+                                
                      
                         
                               
@@ -1894,7 +1895,7 @@ class Meta {
   constructor() {
     const defaults           = {
       bank: 0, relicMarks: 0, bestDepth: 0, runs: 0, extracts: 0, checkpoint: 0,
-      chaptersCleared: 0, backpackLv: 0, shotgunOwned: false,
+      chaptersCleared: 0, surveyedMapChapters: [], backpackLv: 0, shotgunOwned: false,
       weaponCalibrationLv: 0, magLv: 0, shieldCapLv: 0,
       hpLv: 0, sanityLv: 0, reloadLv: 0,
       assistantOwned: false, collection: [],
@@ -1914,6 +1915,10 @@ class Meta {
           this.data.relicMarks = Math.max(0, Number(this.data.relicMarks || 0));
           if (!Array.isArray(this.data.relicMarkCollections)) this.data.relicMarkCollections = [];
           if (!Array.isArray(this.data.bossMarkChapters)) this.data.bossMarkChapters = [];
+          if (!Array.isArray(this.data.surveyedMapChapters)) this.data.surveyedMapChapters = [];
+          for (let chapter = 1; chapter <= this.data.chaptersCleared; chapter++) {
+            if (!this.data.surveyedMapChapters.includes(chapter)) this.data.surveyedMapChapters.push(chapter);
+          }
           this.data.specialGoldPity = Math.max(0, Number(this.data.specialGoldPity || 0));
         }
       }
@@ -7847,7 +7852,7 @@ class Game {
           routePaused          = false; // 展开路线图时暂停
           developerPaused          = false;
           mapVisibilityMode                        ;
-                   chaptersClearedAtRunStart        ;
+                   surveyedChaptersAtRunStart             ;
           transitioning          = false;
           transitionPhase                                = 'fadeIn';
           transitionNode                   = null;
@@ -7902,7 +7907,10 @@ class Game {
     this.meta = meta;
     this.audio = audio;
     this.mapVisibilityMode = mapVisibilityMode;
-    this.chaptersClearedAtRunStart = meta.data.chaptersCleared;
+    this.surveyedChaptersAtRunStart = new Set(meta.data.surveyedMapChapters);
+    for (let chapter = 1; chapter <= meta.data.chaptersCleared; chapter++) {
+      this.surveyedChaptersAtRunStart.add(chapter);
+    }
     const backpackConfig = BACKPACK_UPGRADES[meta.data.backpackLv] || BACKPACK_UPGRADES[0];
     this.bag = new Backpack(backpackConfig.cols, backpackConfig.rows);
 
@@ -8029,14 +8037,14 @@ class Game {
     };
     this.hud.onExtract = (leave         ) => {
       if (leave) {
-        this.endRun(true, '撤离成功');
+        this.endRun(true, '撤离成功', true);
       } else {
         this.offerPact();
       }
     };
     this.hud.onExitConfirm = (leave         ) => {
       if (leave) {
-        this.endRun(true, '撤离成功');
+        this.endRun(true, '撤离成功', true);
       } else {
         this.state = 'interact';
         this.enableRouteChoiceFromMap();
@@ -8117,7 +8125,7 @@ class Game {
     }
 
     const chapter = Math.floor(snapshot.segmentStartDepth / 30) + 1;
-    const surveyed = chapter <= this.chaptersClearedAtRunStart;
+    const surveyed = this.surveyedChaptersAtRunStart.has(chapter);
     const revealedTypeIds = new Set        ();
     for (const node of snapshot.nodes) {
       if (node.visited || node.id === snapshot.currentId || snapshot.choiceIds.includes(node.id)) {
@@ -8359,12 +8367,23 @@ class Game {
     }, true, '🩸 深入契约', '强力增益+永久代价，可婉拒');
   }
 
-          endRun(extracted         , title        )       {
+          chapterForDepth(depth        )         {
+    return Math.floor(Math.max(0, depth) / 30) + 1;
+  }
+
+          endRun(extracted         , title        , surveyChapter          = false)       {
     this.state = 'over';
     const v = this.bag.totalValue;
     const payout = Math.round(v * this.lootValueMult) + this.bag.coins;  // 战利品价值 + 局内金币
     const depth = this.dungeon.currentDepth;
     if (extracted) {
+      if (surveyChapter) {
+        const chapter = this.chapterForDepth(depth);
+        if (!this.meta.data.surveyedMapChapters.includes(chapter)) {
+          this.meta.data.surveyedMapChapters.push(chapter);
+          this.meta.data.surveyedMapChapters.sort((a, b) => a - b);
+        }
+      }
       this.meta.data.bank += payout;
       this.meta.data.extracts += 1;
       for (const item of this.bag.items) {
@@ -8908,7 +8927,7 @@ class Game {
           onBossKilled()       {
     if (!this.boss) return;
     this.kills += 1;
-    const chapter = Math.ceil(this.dungeon.currentDepth / 30);
+    const chapter = this.chapterForDepth(this.dungeon.currentDepth);
     const firstChapterClear = chapter > this.meta.data.chaptersCleared;
     const firstChapterMark = !this.meta.data.bossMarkChapters.includes(chapter);
     if (firstChapterClear) {
