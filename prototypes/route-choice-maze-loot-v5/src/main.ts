@@ -60,7 +60,7 @@ paintSideTexture();
 const meta = new Meta();
 const audio = new AudioFX();
 let selectedStart = 0;
-let selectedMapMode: 'progression' | 'full' = 'progression';
+let selectedMapMode: 'progression' | 'fog' | 'full' = 'progression';
 let activeGame: Game | null = null;
 
 function ensureAudioStarted(): void {
@@ -89,7 +89,9 @@ function syncDeveloperMapMenu(): void {
   const status = document.getElementById('dev-map-status')!;
   status.textContent = selectedMapMode === 'full'
     ? '当前：旧版全解锁地图与房间类型'
-    : '当前：首次迷雾 / 通关后隐藏未探索房型';
+    : selectedMapMode === 'fog'
+      ? '当前：忽略存档，强制使用战争迷雾'
+      : '当前：首次迷雾 / 通关后隐藏未探索房型';
 }
 
 function setDeveloperMapMenuOpen(open: boolean): void {
@@ -99,7 +101,9 @@ function setDeveloperMapMenuOpen(open: boolean): void {
 
 for (const button of devMapButtons) {
   button.addEventListener('click', () => {
-    selectedMapMode = button.dataset.devMapMode === 'full' ? 'full' : 'progression';
+    selectedMapMode = button.dataset.devMapMode === 'full'
+      ? 'full'
+      : button.dataset.devMapMode === 'fog' ? 'fog' : 'progression';
     activeGame?.setMapVisibilityMode(selectedMapMode);
     syncDeveloperMapMenu();
   });

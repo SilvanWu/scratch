@@ -82,7 +82,7 @@ export class Game {
   private userPaused: boolean = false; // 暂停按钮
   private routePaused: boolean = false; // 展开路线图时暂停
   private developerPaused: boolean = false;
-  private mapVisibilityMode: 'progression' | 'full';
+  private mapVisibilityMode: 'progression' | 'fog' | 'full';
   private readonly surveyedChaptersAtRunStart: Set<number>;
   private transitioning: boolean = false;
   private transitionPhase: 'door' | 'fadeIn' | 'fadeOut' = 'fadeIn';
@@ -133,7 +133,7 @@ export class Game {
 
   constructor(
     canvas: HTMLCanvasElement, meta: Meta, audio: AudioFX, startDepth: number,
-    mapVisibilityMode: 'progression' | 'full' = 'progression'
+    mapVisibilityMode: 'progression' | 'fog' | 'full' = 'progression'
   ) {
     this.meta = meta;
     this.audio = audio;
@@ -321,11 +321,12 @@ export class Game {
     this.openRouteChoice('原型预览：选择下一关');
   }
 
-  setMapVisibilityMode(mode: 'progression' | 'full'): void {
+  setMapVisibilityMode(mode: 'progression' | 'fog' | 'full'): void {
     if (this.mapVisibilityMode === mode) return;
     this.mapVisibilityMode = mode;
     this.refreshRouteMap();
-    this.hud.showToast(mode === 'full' ? '开发者地图：全解锁' : '开发者地图：探索规则');
+    const label = mode === 'full' ? '全解锁' : mode === 'fog' ? '强制战争迷雾' : '自动探索规则';
+    this.hud.showToast(`开发者地图：${label}`);
   }
 
   setDeveloperModalOpen(open: boolean): void {
@@ -356,7 +357,7 @@ export class Game {
     }
 
     const chapter = Math.floor(snapshot.segmentStartDepth / 30) + 1;
-    const surveyed = this.surveyedChaptersAtRunStart.has(chapter);
+    const surveyed = this.mapVisibilityMode === 'progression' && this.surveyedChaptersAtRunStart.has(chapter);
     const revealedTypeIds = new Set<string>();
     for (const node of snapshot.nodes) {
       if (node.visited || node.id === snapshot.currentId || snapshot.choiceIds.includes(node.id)) {
