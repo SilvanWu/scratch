@@ -337,12 +337,15 @@
   #crosshair::before { left: 11px; top: 2px; width: 2px; height: 20px; }
   #crosshair::after { left: 2px; top: 11px; width: 20px; height: 2px; }
   #aim-assist-ring {
-    position: absolute; left: 50%; top: 50%; width: 86px; height: 86px;
+    position: absolute; left: 50%; top: 50%; width: 40px; height: 40px;
     transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none;
     border: 1px solid rgba(255,255,255,.5); box-shadow: 0 0 8px rgba(0,0,0,.7);
     opacity: 0; z-index: 4; transition: opacity .12s, border-color .12s, box-shadow .12s;
   }
   #aim-assist-ring.active { opacity: .62; }
+  #aim-assist-ring.disabled, #aim-assist-ring.active.disabled {
+    opacity: 0; border-width: 0; box-shadow: none;
+  }
   #aim-assist-ring.locked {
     opacity: .95; border-color: #7CFFB0;
     box-shadow: 0 0 10px rgba(124,255,176,.65), inset 0 0 8px rgba(124,255,176,.16);
@@ -1289,9 +1292,9 @@
     </label>
     <input id="sens-slider" type="range" min="0.3" max="1.6" step="0.05" value="0.8" style="width:100%">
     <label class="setting-row">
-      <span>头部吸附范围</span><strong id="assist-range-val">43 px</strong>
+      <span>头部吸附范围</span><strong id="assist-range-val">20 px</strong>
     </label>
-    <input id="assist-range-slider" class="setting-slider" type="range" min="0.06" max="0.13" step="0.005" value="0.095">
+    <input id="assist-range-slider" class="setting-slider" type="range" min="0" max="30" step="1" value="20">
   </div>
   <button id="resume-btn" class="big-btn">继续游戏</button>
 </div>
@@ -7019,6 +7022,7 @@ class HUD {
 
   setAimAssistRadius(radiusPx        )       {
     const diameter = Math.round(radiusPx * 2);
+    this.aimAssistRing.classList.toggle('disabled', radiusPx <= 0);
     this.aimAssistRing.style.width = `${diameter}px`;
     this.aimAssistRing.style.height = `${diameter}px`;
     const label = document.getElementById('assist-range-val');
@@ -7915,7 +7919,7 @@ class Game {
           routePaused          = false; // 展开路线图时暂停
           developerPaused          = false;
           mapVisibilityMode                                             ;
-          aimAssistRangeRatio         = 0.095;
+          aimAssistRangePx         = 20;
                    surveyedChaptersAtRunStart             ;
           transitioning          = false;
           transitionPhase                                = 'fadeIn';
@@ -8171,13 +8175,12 @@ class Game {
   }
 
           setAimAssistRange(value        )       {
-    this.aimAssistRangeRatio = Math.max(0.06, Math.min(0.13, value));
+    this.aimAssistRangePx = Math.max(0, Math.min(30, value));
     this.hud.setAimAssistRadius(this.aimAssistRadiusPx());
   }
 
           aimAssistRadiusPx()         {
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    return Math.max(28, Math.min(58, Math.min(rect.width, rect.height) * this.aimAssistRangeRatio));
+    return this.aimAssistRangePx;
   }
 
   setDeveloperModalOpen(open         )       {
@@ -9349,6 +9352,7 @@ class Game {
           aimAssistHeadNDC()                       {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const radiusPx = this.aimAssistRadiusPx();
+    if (radiusPx <= 0) return null;
     let best                                                                               = null;
     const world = new THREE.Vector3();
     const consider = (head                )       => {

@@ -1279,6 +1279,7 @@ export class HUD {
 
   setAimAssistRadius(radiusPx: number): void {
     const diameter = Math.round(radiusPx * 2);
+    this.aimAssistRing.classList.toggle('disabled', radiusPx <= 0);
     this.aimAssistRing.style.width = `${diameter}px`;
     this.aimAssistRing.style.height = `${diameter}px`;
     const label = document.getElementById('assist-range-val');

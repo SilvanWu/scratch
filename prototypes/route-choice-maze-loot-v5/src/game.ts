@@ -83,7 +83,7 @@ export class Game {
   private routePaused: boolean = false; // 展开路线图时暂停
   private developerPaused: boolean = false;
   private mapVisibilityMode: 'progression' | 'fog' | 'surveyed' | 'full';
-  private aimAssistRangeRatio: number = 0.095;
+  private aimAssistRangePx: number = 20;
   private readonly surveyedChaptersAtRunStart: Set<number>;
   private transitioning: boolean = false;
   private transitionPhase: 'door' | 'fadeIn' | 'fadeOut' = 'fadeIn';
@@ -339,13 +339,12 @@ export class Game {
   }
 
   private setAimAssistRange(value: number): void {
-    this.aimAssistRangeRatio = Math.max(0.06, Math.min(0.13, value));
+    this.aimAssistRangePx = Math.max(0, Math.min(30, value));
     this.hud.setAimAssistRadius(this.aimAssistRadiusPx());
   }
 
   private aimAssistRadiusPx(): number {
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    return Math.max(28, Math.min(58, Math.min(rect.width, rect.height) * this.aimAssistRangeRatio));
+    return this.aimAssistRangePx;
   }
 
   setDeveloperModalOpen(open: boolean): void {
@@ -1517,6 +1516,7 @@ export class Game {
   private aimAssistHeadNDC(): THREE.Vector2 | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const radiusPx = this.aimAssistRadiusPx();
+    if (radiusPx <= 0) return null;
     let best: { ndc: THREE.Vector2; screenDistance: number; worldDistance: number } | null = null;
     const world = new THREE.Vector3();
     const consider = (head: THREE.Object3D): void => {
