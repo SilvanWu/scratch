@@ -25,6 +25,7 @@
   }
   #stage:not(.game-started) #hud,
   #stage:not(.game-started) #crosshair,
+  #stage:not(.game-started) #aim-assist-ring,
   #stage:not(.game-started) #hitmarker,
   #stage:not(.game-started) #search-ring,
   #stage:not(.game-started) #floater-layer {
@@ -335,6 +336,17 @@
   }
   #crosshair::before { left: 11px; top: 2px; width: 2px; height: 20px; }
   #crosshair::after { left: 2px; top: 11px; width: 20px; height: 2px; }
+  #aim-assist-ring {
+    position: absolute; left: 50%; top: 50%; width: 86px; height: 86px;
+    transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none;
+    border: 1px solid rgba(255,255,255,.5); box-shadow: 0 0 8px rgba(0,0,0,.7);
+    opacity: 0; z-index: 4; transition: opacity .12s, border-color .12s, box-shadow .12s;
+  }
+  #aim-assist-ring.active { opacity: .62; }
+  #aim-assist-ring.locked {
+    opacity: .95; border-color: #7CFFB0;
+    box-shadow: 0 0 10px rgba(124,255,176,.65), inset 0 0 8px rgba(124,255,176,.16);
+  }
   #hitmarker {
     position: absolute; left: -10px; top: -28px; pointer-events: none;
     font-size: 22px; font-weight: 900; opacity: 0; will-change: transform;
@@ -1188,6 +1200,7 @@
   </div>
 </div>
 <div id="crosshair"></div>
+<div id="aim-assist-ring"></div>
 <div id="hitmarker">✕</div>
 <div id="search-ring">
   <svg viewBox="0 0 100 100">
@@ -1275,6 +1288,10 @@
       <span>🖱 瞄准灵敏度</span><span id="sens-val">0.8×</span>
     </label>
     <input id="sens-slider" type="range" min="0.3" max="1.6" step="0.05" value="0.8" style="width:100%">
+    <label class="setting-row">
+      <span>头部吸附范围</span><strong id="assist-range-val">43 px</strong>
+    </label>
+    <input id="assist-range-slider" class="setting-slider" type="range" min="0.06" max="0.13" step="0.005" value="0.095">
   </div>
   <button id="resume-btn" class="big-btn">继续游戏</button>
 </div>
@@ -1282,13 +1299,13 @@
   <div id="dev-map-dialog" role="dialog" aria-modal="true" aria-labelledby="dev-map-title">
     <h2 id="dev-map-title">开发者地图模式</h2>
     <div id="dev-map-status"></div>
-    <button class="dev-map-option" type="button" data-dev-map-mode="progression">
-      <span class="dev-map-icon">◐</span><strong>自动探索规则</strong>
-      <span>未通关章节只显示已探索区域、相邻房间及固定地标；通关章节显示全地形。</span>
-    </button>
     <button class="dev-map-option" type="button" data-dev-map-mode="fog">
       <span class="dev-map-icon">◑</span><strong>强制战争迷雾</strong>
       <span>忽略当前章节的勘测记录，只显示已进入房间、当前邻居、BOSS 和撤离点。</span>
+    </button>
+    <button class="dev-map-option" type="button" data-dev-map-mode="surveyed">
+      <span class="dev-map-icon">?</span><strong>问号地图</strong>
+      <span>显示完整地形，当前邻居和固定地标显示房型，其余房间使用问号。</span>
     </button>
     <button class="dev-map-option" type="button" data-dev-map-mode="full">
       <span class="dev-map-icon">◎</span><strong>旧版全解锁</strong>

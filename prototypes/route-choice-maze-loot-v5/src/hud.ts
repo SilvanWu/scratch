@@ -93,6 +93,7 @@ export class HUD {
   private depthText: HTMLElement;
   private stateText: HTMLElement;
   private crosshair: HTMLElement;
+  private aimAssistRing: HTMLElement;
   private hitmarker: HTMLElement;
   private toastEl: HTMLElement;
   private promptEl: HTMLElement;
@@ -198,6 +199,7 @@ export class HUD {
   onPauseToggle: ((paused: boolean) => void) | null = null; // 暂停按钮
   onRouteMapToggle: ((open: boolean) => void) | null = null; // 展开路线图（暂停）
   onSensitivity: ((v: number) => void) | null = null;       // 瞄准灵敏度滑块
+  onAimAssistRange: ((v: number) => void) | null = null;    // 头部吸附范围滑块
 
   constructor() {
     const $ = (id: string): HTMLElement => document.getElementById(id)!;
@@ -208,7 +210,7 @@ export class HUD {
     this.shieldText = $('shield-text');
     this.pickupLog = $('pickup-log'); this.depthText = $('depth-text');
     this.stateText = $('state-text');
-    this.crosshair = $('crosshair'); this.hitmarker = $('hitmarker');
+    this.crosshair = $('crosshair'); this.aimAssistRing = $('aim-assist-ring'); this.hitmarker = $('hitmarker');
     this.toastEl = $('toast'); this.promptEl = $('prompt');
     this.vignette = $('vignette');
     this.sanVignette = $('vignette-san');
@@ -327,6 +329,11 @@ export class HUD {
       const v = parseFloat(sensSlider.value);
       sensVal.textContent = v.toFixed(2) + '×';
       if (this.onSensitivity) this.onSensitivity(v);
+    });
+    const assistSlider = $('assist-range-slider') as HTMLInputElement;
+    assistSlider.addEventListener('input', () => {
+      const v = parseFloat(assistSlider.value);
+      if (this.onAimAssistRange) this.onAimAssistRange(v);
     });
     // 武器栏：点击卸下
     this.wslotEls.forEach((el, slot) => {
@@ -1264,7 +1271,23 @@ export class HUD {
     this.intelOverlay.style.display = 'flex';
   }
 
-  setAds(on: boolean): void { this.adsMode = on; }
+  setAds(on: boolean): void {
+    this.adsMode = on;
+    this.aimAssistRing.classList.toggle('active', on);
+    if (!on) this.aimAssistRing.classList.remove('locked');
+  }
+
+  setAimAssistRadius(radiusPx: number): void {
+    const diameter = Math.round(radiusPx * 2);
+    this.aimAssistRing.style.width = `${diameter}px`;
+    this.aimAssistRing.style.height = `${diameter}px`;
+    const label = document.getElementById('assist-range-val');
+    if (label) label.textContent = `${Math.round(radiusPx)} px`;
+  }
+
+  setAimAssistLocked(locked: boolean): void {
+    this.aimAssistRing.classList.toggle('locked', locked && this.adsMode);
+  }
 
   setRoomTransition(alpha: number, visible: boolean): void {
     this.roomTransition.style.display = visible ? 'block' : 'none';
@@ -1485,7 +1508,7 @@ export class HUD {
     if (previewTitle) {
       previewTitle.textContent = snapshot.visibilityMode === 'fog'
         ? '战争迷雾'
-        : snapshot.visibilityMode === 'surveyed' ? '勘测地图' : '全解锁地图';
+        : snapshot.visibilityMode === 'surveyed' ? '问号地图' : '全解锁地图';
     }
     const gridGap = 32;
     const mapPadding = 36;

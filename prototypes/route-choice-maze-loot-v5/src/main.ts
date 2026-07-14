@@ -60,7 +60,7 @@ paintSideTexture();
 const meta = new Meta();
 const audio = new AudioFX();
 let selectedStart = 0;
-let selectedMapMode: 'progression' | 'fog' | 'full' = 'progression';
+let selectedMapMode: 'progression' | 'fog' | 'surveyed' | 'full' = 'progression';
 let activeGame: Game | null = null;
 
 function ensureAudioStarted(): void {
@@ -83,18 +83,21 @@ const devMapOverlay = document.getElementById('dev-map-overlay')!;
 const devMapButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-dev-map-mode]'));
 
 function syncDeveloperMapMenu(): void {
+  const automaticMode: 'fog' | 'full' = activeGame
+    ? (activeGame.getEffectiveMapVisibilityMode() === 'full' ? 'full' : 'fog')
+    : (meta.data.surveyedMapChapters.includes(Math.floor(selectedStart / 30) + 1) ||
+       Math.floor(selectedStart / 30) + 1 <= meta.data.chaptersCleared ? 'full' : 'fog');
+  const displayedMode = selectedMapMode === 'progression' ? automaticMode : selectedMapMode;
   for (const button of devMapButtons) {
-    button.classList.toggle('active', button.dataset.devMapMode === selectedMapMode);
+    button.classList.toggle('active', button.dataset.devMapMode === displayedMode);
   }
   const status = document.getElementById('dev-map-status')!;
-  status.textContent = selectedMapMode === 'full'
-    ? '当前：旧版全解锁地图与房间类型'
-    : selectedMapMode === 'fog'
-      ? '当前：忽略存档，强制使用战争迷雾'
-      : '当前：首次迷雾 / 通关后完整地图';
+  const label = displayedMode === 'full' ? '全解锁地图' : displayedMode === 'surveyed' ? '问号地图' : '战争迷雾';
+  status.textContent = selectedMapMode === 'progression' ? `当前：自动规则 · ${label}` : `当前：强制 · ${label}`;
 }
 
 function setDeveloperMapMenuOpen(open: boolean): void {
+  if (open) syncDeveloperMapMenu();
   devMapOverlay.style.display = open ? 'flex' : 'none';
   activeGame?.setDeveloperModalOpen(open);
 }
@@ -103,7 +106,7 @@ for (const button of devMapButtons) {
   button.addEventListener('click', () => {
     selectedMapMode = button.dataset.devMapMode === 'full'
       ? 'full'
-      : button.dataset.devMapMode === 'fog' ? 'fog' : 'progression';
+      : button.dataset.devMapMode === 'surveyed' ? 'surveyed' : 'fog';
     activeGame?.setMapVisibilityMode(selectedMapMode);
     syncDeveloperMapMenu();
   });

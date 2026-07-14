@@ -82,7 +82,8 @@ export class Game {
   private userPaused: boolean = false; // 暂停按钮
   private routePaused: boolean = false; // 展开路线图时暂停
   private developerPaused: boolean = false;
-  private mapVisibilityMode: 'progression' | 'fog' | 'full';
+  private mapVisibilityMode: 'progression' | 'fog' | 'surveyed' | 'full';
+  private aimAssistRangeRatio: number = 0.095;
   private readonly surveyedChaptersAtRunStart: Set<number>;
   private transitioning: boolean = false;
   private transitionPhase: 'door' | 'fadeIn' | 'fadeOut' = 'fadeIn';
@@ -133,7 +134,7 @@ export class Game {
 
   constructor(
     canvas: HTMLCanvasElement, meta: Meta, audio: AudioFX, startDepth: number,
-    mapVisibilityMode: 'progression' | 'fog' | 'full' = 'progression'
+    mapVisibilityMode: 'progression' | 'fog' | 'surveyed' | 'full' = 'progression'
   ) {
     this.meta = meta;
     this.audio = audio;
@@ -171,6 +172,7 @@ export class Game {
       this.camera.aspect = s.w / s.h;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(s.w, s.h);
+      if (this.hud) this.hud.setAimAssistRadius(this.aimAssistRadiusPx());
     });
 
     this.input = new Input(canvas);
@@ -262,6 +264,8 @@ export class Game {
       this.input.cancelPointer();
     };
     this.hud.onSensitivity = (v) => { this.player.aimSensitivity = v; };
+    this.hud.onAimAssistRange = (v) => this.setAimAssistRange(v);
+    this.hud.setAimAssistRadius(this.aimAssistRadiusPx());
 
     this.hud.onChoice = (node: RouteNode) => {
       this.beginRouteTransition(node, false);
@@ -321,12 +325,27 @@ export class Game {
     this.openRouteChoice('原型预览：选择下一关');
   }
 
-  setMapVisibilityMode(mode: 'progression' | 'fog' | 'full'): void {
+  setMapVisibilityMode(mode: 'progression' | 'fog' | 'surveyed' | 'full'): void {
     if (this.mapVisibilityMode === mode) return;
     this.mapVisibilityMode = mode;
     this.refreshRouteMap();
-    const label = mode === 'full' ? '全解锁' : mode === 'fog' ? '强制战争迷雾' : '自动探索规则';
+    const label = mode === 'full' ? '全解锁' : mode === 'surveyed' ? '问号地图' :
+      mode === 'fog' ? '战争迷雾' : '自动探索规则';
     this.hud.showToast(`开发者地图：${label}`);
+  }
+
+  getEffectiveMapVisibilityMode(): 'fog' | 'surveyed' | 'full' {
+    return this.visibleRouteSnapshot().visibilityMode;
+  }
+
+  private setAimAssistRange(value: number): void {
+    this.aimAssistRangeRatio = Math.max(0.06, Math.min(0.13, value));
+    this.hud.setAimAssistRadius(this.aimAssistRadiusPx());
+  }
+
+  private aimAssistRadiusPx(): number {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    return Math.max(28, Math.min(58, Math.min(rect.width, rect.height) * this.aimAssistRangeRatio));
   }
 
   setDeveloperModalOpen(open: boolean): void {
@@ -374,6 +393,15 @@ export class Game {
         visibilityMode: 'full',
         visibleIds: allIds,
         revealedTypeIds: allIds,
+      };
+    }
+
+    if (this.mapVisibilityMode === 'surveyed') {
+      return {
+        ...snapshot,
+        visibilityMode: 'surveyed',
+        visibleIds: allIds,
+        revealedTypeIds: Array.from(revealedTypeIds),
       };
     }
 
@@ -1488,7 +1516,7 @@ export class Game {
 
   private aimAssistHeadNDC(): THREE.Vector2 | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
-    const radiusPx = Math.max(34, Math.min(64, Math.min(rect.width, rect.height) * 0.115));
+    const radiusPx = this.aimAssistRadiusPx();
     let best: { ndc: THREE.Vector2; screenDistance: number; worldDistance: number } | null = null;
     const world = new THREE.Vector3();
     const consider = (head: THREE.Object3D): void => {
@@ -1855,6 +1883,7 @@ export class Game {
       const ammoType = this.player.weapon.ammoType;
       const reserve = ammoType === 'pistol' ? 9999 : this.bag.bulletsOf(ammoType);  // 手枪无限
       this.player.update(dt, moving, this.input.mouseNDC, this.audio, time, manualAim, reserve);
+      this.hud.setAimAssistLocked(manualAim && this.aimAssistHeadNDC() !== null);
       if (ammoType !== 'pistol' && this.player.reloadDrew > 0) this.bag.takeBulletsOf(ammoType, this.player.reloadDrew);
 
       if (this.assistant) {
