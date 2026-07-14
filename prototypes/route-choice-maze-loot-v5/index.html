@@ -1278,7 +1278,7 @@
     <div id="dev-map-status"></div>
     <button class="dev-map-option" type="button" data-dev-map-mode="progression">
       <span class="dev-map-icon">◐</span><strong>探索规则</strong>
-      <span>未通关章节使用战争迷雾；通关章节显示全地形，但隐藏未探索房型。</span>
+      <span>未通关章节只显示已探索区域、相邻房间及固定地标；通关章节显示全地形。</span>
     </button>
     <button class="dev-map-option" type="button" data-dev-map-mode="full">
       <span class="dev-map-icon">◎</span><strong>旧版全解锁</strong>
@@ -8131,7 +8131,7 @@ class Game {
       if (node.visited || node.id === snapshot.currentId || snapshot.choiceIds.includes(node.id)) {
         revealedTypeIds.add(node.id);
       }
-      if (surveyed && (node.type === 'boss' || node.type === 'exit')) {
+      if (node.type === 'boss' || node.type === 'exit') {
         revealedTypeIds.add(node.id);
       }
     }
@@ -8150,6 +8150,9 @@ class Game {
       if (!node.visited && node.id !== snapshot.currentId) continue;
       visibleIds.add(node.id);
       for (const linkedId of node.links) visibleIds.add(linkedId);
+    }
+    for (const node of snapshot.nodes) {
+      if (node.type === 'boss' || node.type === 'exit') visibleIds.add(node.id);
     }
     for (const choiceId of snapshot.choiceIds) visibleIds.add(choiceId);
 

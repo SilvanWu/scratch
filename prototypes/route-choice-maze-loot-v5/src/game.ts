@@ -362,7 +362,7 @@ export class Game {
       if (node.visited || node.id === snapshot.currentId || snapshot.choiceIds.includes(node.id)) {
         revealedTypeIds.add(node.id);
       }
-      if (surveyed && (node.type === 'boss' || node.type === 'exit')) {
+      if (node.type === 'boss' || node.type === 'exit') {
         revealedTypeIds.add(node.id);
       }
     }
@@ -381,6 +381,9 @@ export class Game {
       if (!node.visited && node.id !== snapshot.currentId) continue;
       visibleIds.add(node.id);
       for (const linkedId of node.links) visibleIds.add(linkedId);
+    }
+    for (const node of snapshot.nodes) {
+      if (node.type === 'boss' || node.type === 'exit') visibleIds.add(node.id);
     }
     for (const choiceId of snapshot.choiceIds) visibleIds.add(choiceId);
 
